@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# IDE
+.idea/
+
+# Banco local (16 MB, reconstrutível: migrate + importar_kaggle)
+db.sqlite3
+
+# Pesos do modelo (436 MB, acima do limite do GitHub).
+# Reconstrutível: manage.py treinar_bertimbau — ver docs/TREINAMENTO.md
+models/bertimbau/

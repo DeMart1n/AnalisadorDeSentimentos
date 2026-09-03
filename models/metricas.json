@@ -1,0 +1,57 @@
+{
+  "n_teste": 12615,
+  "modelos": [
+    {
+      "nome": "lexico",
+      "f1_macro": 0.4885,
+      "matriz": [
+        [
+          3303,
+          114,
+          1272
+        ],
+        [
+          414,
+          1626,
+          2745
+        ],
+        [
+          1430,
+          345,
+          1366
+        ]
+      ]
+    },
+    {
+      "nome": "classico",
+      "f1_macro": 0.7346,
+      "matriz": [
+        [
+          3645,
+          163,
+          881
+        ],
+        [
+          87,
+          4097,
+          601
+        ],
+        [
+          674,
+          673,
+          1794
+        ]
+      ]
+    }
+  ],
+  "mcnemar": [
+    {
+      "a": "lexico",
+      "b": "classico",
+      "acertos_so_de_a": 1343,
+      "acertos_so_de_b": 4584,
+      "p": 0.0,
+      "significativo": true
+    }
+  ]
+}
