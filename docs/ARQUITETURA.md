@@ -31,7 +31,7 @@ analise/
   indicadores.py             indicadores de sessão
   avaliacao.py               split por conversa, F1 macro, matriz, McNemar
   views.py / urls.py         API
-  tests.py                   31 testes
+  tests.py                   26 testes
   modelos/
     __init__.py              registro dos degraus e factory `carregar(nome)`
     lexico.py                degrau 1

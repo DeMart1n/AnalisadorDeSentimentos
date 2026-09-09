@@ -16,6 +16,7 @@ camada de apresentação em cima do resultado.
 | [docs/TREINAMENTO.md](docs/TREINAMENTO.md) | Dados, pré-processamento, hiperparâmetros, reprodução |
 | [docs/RESULTADOS.md](docs/RESULTADOS.md) | Métricas, matrizes de confusão, McNemar, análise de erro |
 | [docs/API.md](docs/API.md) | Os 4 endpoints, formatos de request/response |
+| [docs/relatorio/](docs/relatorio/00-VISAO-GERAL.md) | Relatório do sistema por módulo: [frontend](docs/relatorio/01-FRONTEND.md), [backend](docs/relatorio/02-BACKEND.md), [modelo IA](docs/relatorio/03-MODELO-IA.md) |
 
 ## Estado atual
 
