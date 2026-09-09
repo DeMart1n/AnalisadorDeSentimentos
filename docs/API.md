@@ -131,11 +131,16 @@ rótulo de referência quando existe. É a rota que alimenta a timeline da tela 
 
 Duas coisas diferentes na mesma resposta:
 
-- `distribuicao` e `total_conversas` — agregados **ao vivo** do banco, sobre o que foi
-  classificado.
+- `distribuicao` e `total_conversas` — agregados **ao vivo** do banco. `distribuicao` conta
+  `rotulo_pred` (a predição do modelo), **não** `rotulo_real`.
 - `modelos` — conteúdo de `models/metricas.json`, gerado pela **última execução** de
   `manage.py avaliar --salvar`. É `null` se o arquivo não existe. Não é recalculado pela API:
   a avaliação é offline por definição.
+
+> **Estado atual do banco local:** as 63k mensagens importadas do dataset público têm
+> `rotulo_real` mas nunca passaram pelo classificador — só as 3 mensagens das conversas de
+> teste manual. A resposta real hoje é `"distribuicao": {"negativo": 2, "positivo": 1}`. O
+> exemplo abaixo é ilustrativo do formato, com o banco totalmente classificado.
 
 ```json
 {
@@ -157,6 +162,10 @@ Duas coisas diferentes na mesma resposta:
 
 A matriz vem sempre na ordem **positivo, negativo, neutro**, linhas = verdadeiro,
 colunas = predito.
+
+O `metricas.json` em disco hoje contém apenas **léxico e clássico** — a última execução com
+`--salvar` não incluiu o BERTimbau. Reexecutar `avaliar --modelos lexico classico bertimbau
+--salvar` para o comparativo ficar completo.
 
 ---
 

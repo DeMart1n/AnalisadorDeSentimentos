@@ -46,7 +46,8 @@ next (frontend)  →  django REST (api)  →  sqlite
 - Um app Django: `analise`. Sem microserviço, sem Celery, sem fila. Inferência síncrona na request; se um upload grande travar, aí sim vira job.
 - Modelo carregado uma vez no processo, em cache de módulo.
 - SQLite. Migrar para Postgres só se houver dado real em volume.
-- Treino fora do Django: `scripts/train.py`, salva em `models/bertimbau/`.
+- Treino fora do Django em runtime: comando de gerenciamento `manage.py treinar_bertimbau`,
+  salva em `models/bertimbau/`.
 
 ## 4. Modelo de dados
 
