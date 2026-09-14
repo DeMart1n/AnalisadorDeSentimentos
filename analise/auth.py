@@ -60,3 +60,13 @@ def jwt_required(view_func):
         return view_func(request, *args, **kwargs)
 
     return wrapper
+
+def admin_required(view_func):
+    @jwt_required
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if getattr(request, "user_role", None) != "ADMIN":
+            return JsonResponse({"erro": "Acesso negado."}, status=403)
+        return view_func(request, *args, **kwargs)
+
+    return wrapper

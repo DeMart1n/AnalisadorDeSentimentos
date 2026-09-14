@@ -71,8 +71,12 @@ Autentica um usuário existente por e-mail e senha, gerando um par de tokens JWT
 
 ## `POST /api/upload`
 
-Recebe um arquivo, importa, classifica as mensagens de usuário e devolve o resumo.
-`multipart/form-data`. **CSRF desativado** (`@csrf_exempt`) — ver ARQUITETURA.md.
+Recebe um arquivo, valida o esquema e grava as conversas e mensagens no banco de dados de forma rápida e segura.
+`multipart/form-data`. **CSRF desativado** (`@csrf_exempt`).
+
+> 🔒 **Autenticação & Permissão:** Rota protegida via JWT (`@admin_required`). Requer cabeçalho `Authorization: Bearer <access_token>` com role **`ADMIN`**. Usuários com role `USER` recebem `403 Forbidden`.
+
+A classificação por IA foi desacoplada deste endpoint para garantir resposta quase instantânea (~50ms) e evitar timeouts de rede. Para classificar as mensagens importadas, chame o endpoint `POST /api/conversas/analisar`.
 
 | Campo | Obrigatório | Descrição |
 |---|---|---|
@@ -101,29 +105,70 @@ c2,1,usuario,obrigado resolveu,,positivo
 
 ### Comportamento
 
-- **Ou entra tudo, ou nada.** A importação é uma transação: qualquer erro de esquema aborta o
-  arquivo inteiro. Um CSV meio importado é pior que um erro.
+- **Ou entra tudo, ou nada.** A importação é uma transação atômica: qualquer erro de esquema aborta o
+  arquivo inteiro.
 - **Reimportar substitui.** Mesma `(fonte, conversa_id)` → as mensagens antigas são apagadas e
-  regravadas. Corrigir e reenviar não duplica.
-- **Só mensagens de `usuario` são classificadas.** As de `sistema` e `atendente` são gravadas
-  com `rotulo_pred = null`.
-- **A classificação é síncrona**, dentro da request, e reclassifica todas as conversas da
-  `fonte` — não apenas as do arquivo enviado.
+  regravadas sem duplicar.
+- **As mensagens são salvas inicialmente com `rotulo_pred = null`**, aguardando análise pelo endpoint de classificação.
 
 ### Resposta
 
 ```json
-{"fonte": "piloto", "conversas": 2, "mensagens": 3, "mensagens_classificadas": 2}
+{"fonte": "piloto", "conversas": 2, "mensagens": 3, "status": "importado"}
 ```
 
 | Status | Quando |
 |---|---|
-| 200 | importado e classificado |
-| 400 | sem campo `arquivo`; arquivo não é UTF-8; JSON malformado; erro de esquema (com `detalhes`, até 20 mensagens) |
+| 201 | Arquivo validado e conversas importadas com sucesso |
+| 400 | Sem campo `arquivo`; arquivo não é UTF-8; JSON malformado; erro de esquema (com `detalhes`, até 20 mensagens) |
+| 401 | Token JWT ausente, expirado ou inválido |
+| 403 | Usuário autenticado, mas não possui a role `ADMIN` |
 
 ```json
-{"erro": "arquivo inválido", "detalhes": ["linha 4: autor inválido 'robo'", "linha 7: ordem não é inteiro: 'x'"]}
+{"erro": "Acesso negado: privilégios de administrador necessários."}
 ```
+
+---
+
+## `POST /api/conversas/analisar`
+
+Dispara a inferência da IA para classificar o sentimento das mensagens de usuário (`positivo | negativo | neutro`) das conversas previamente importadas. `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+> 🔒 **Autenticação:** Rota protegida via JWT (`@jwt_required`). Requer cabeçalho `Authorization: Bearer <access_token>` de qualquer usuário autenticado (`ADMIN` ou `USER`).
+
+| Campo | Obrigatório | Tipo | Padrão | Descrição |
+|---|---|---|---|---|
+| `fonte` | condicional | string | `null` | Identificador da base a ser analisada (obrigatório se não informar `conversa_ids`) |
+| `conversa_ids` | condicional | array[int] | `null` | Lista específica de IDs das conversas (obrigatório se não informar `fonte`) |
+| `modelo` | não | string | `"lexico"` | Modelo a utilizar: `"lexico"`, `"classico"` ou `"bertimbau"` |
+| `apenas_nao_classificadas` | não | boolean | `true` | Se `true`, classifica apenas mensagens pendentes (`rotulo_pred is null`). Se `false`, reclassifica tudo |
+
+### Payload de exemplo
+
+```json
+{
+  "fonte": "piloto",
+  "modelo": "lexico",
+  "apenas_nao_classificadas": true
+}
+```
+
+### Resposta
+
+```json
+{
+  "fonte": "piloto",
+  "total_conversas": 2,
+  "mensagens_classificadas": 2,
+  "modelo_utilizado": "lexico"
+}
+```
+
+| Status | Quando |
+|---|---|
+| 200 | Mensagens analisadas e classificadas com sucesso |
+| 400 | Payload malformado, modelo inválido ou ausência de `fonte`/`conversa_ids` |
+| 404 | Nenhuma conversa encontrada para a fonte ou IDs informados |
 
 ---
 

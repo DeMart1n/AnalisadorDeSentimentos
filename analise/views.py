@@ -12,8 +12,9 @@ from .indicadores import indicadores
 from .models import USUARIO, Conversa, Mensagem, Users
 from .dtos.create_user_dto import CreateUserDTO, UserOutputDTO
 from .dtos.login_dto import LoginUserDTO, LoginOutputDTO
+from .dtos.analise_dto import AnalisarConversasDTO, AnalisarConversasOutputDTO
 from django.contrib.auth.hashers import make_password, check_password
-from .auth import token_generator
+from .auth import token_generator, jwt_required, admin_required
 
 METRICAS = Path(__file__).resolve().parents[1] / "models" / "metricas.json"
 
@@ -57,6 +58,7 @@ def login(request):
 
 @csrf_exempt  # ponytail: app local sem autenticação nem sessão. Reativar CSRF quando entrar auth ou dado real de empresa.
 @require_POST
+@admin_required
 def upload(request):
     arquivo = request.FILES.get("arquivo")
     if not arquivo:
@@ -75,14 +77,50 @@ def upload(request):
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
 
-    ids = list(Conversa.objects.filter(fonte=fonte).values_list("id", flat=True))
-    classificadas = classificar_conversas(ids)
     return JsonResponse({
         "fonte": fonte,
         "conversas": n_conversas,
         "mensagens": n_mensagens,
-        "mensagens_classificadas": classificadas,
-    })
+        "status": "importado",
+    }, status=201)
+
+
+@csrf_exempt
+@require_POST
+@jwt_required
+def analisar(request):
+    try:
+        data = json.loads(request.body)
+        dto = AnalisarConversasDTO.from_dict(data)
+
+        qs = Conversa.objects.all()
+        if dto.fonte:
+            qs = qs.filter(fonte=dto.fonte)
+        if dto.conversa_ids:
+            qs = qs.filter(id__in=dto.conversa_ids)
+
+        ids = list(qs.values_list("id", flat=True))
+        if not ids:
+            return JsonResponse({"erro": "Nenhuma conversa encontrada para os critérios informados."}, status=404)
+
+        classificadas = classificar_conversas(
+            ids=ids,
+            nome=dto.modelo,
+            apenas_nao_classificadas=dto.apenas_nao_classificadas,
+        )
+
+        output = AnalisarConversasOutputDTO(
+            fonte=dto.fonte,
+            total_conversas=len(ids),
+            mensagens_classificadas=classificadas,
+            modelo_utilizado=dto.modelo,
+        )
+        return JsonResponse(output.to_dict(), status=200)
+
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
 
 
 @require_GET

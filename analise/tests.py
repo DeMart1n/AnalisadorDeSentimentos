@@ -1,7 +1,9 @@
 from django.test import TestCase
+from django.contrib.auth.hashers import make_password
 
 from .importacao import ErroDeImportacao, importar
-from .models import Conversa, Mensagem
+from .models import Conversa, Mensagem, Users
+from .auth import token_generator
 
 CSV = (
     "conversa_id,ordem,autor,texto,timestamp,rotulo\n"
@@ -107,10 +109,15 @@ class EscadaTest(TestCase):
             carregar("gpt")
 
     def test_todos_expoem_a_mesma_interface(self):
-        # bertimbau fica de fora: instanciar baixaria pesos. A checagem é estática.
-        from .modelos.bertimbau import Bertimbau
+        # bertimbau fica de fora se torch não estiver instalado no ambiente leve
+        classes = [type(carregar("lexico")), type(carregar("classico"))]
+        try:
+            from .modelos.bertimbau import Bertimbau
+            classes.append(Bertimbau)
+        except ImportError:
+            pass
 
-        for classe in (type(carregar("lexico")), type(carregar("classico")), Bertimbau):
+        for classe in classes:
             self.assertTrue(callable(getattr(classe, "treinar")))
             self.assertTrue(callable(getattr(classe, "prever")))
             self.assertTrue(hasattr(classe, "nome"))
@@ -144,27 +151,112 @@ class IndicadoresTest(TestCase):
 class ApiTest(TestCase):
     def setUp(self):
         importar(CSV, fonte="teste")
+        self.admin = Users.objects.create(
+            name="Admin",
+            email="admin@email.com",
+            password=make_password("senha123"),
+            role="ADMIN",
+        )
+        self.admin_token, _ = token_generator(self.admin)
+        self.admin_headers = {"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"}
+
+        self.user = Users.objects.create(
+            name="User",
+            email="user@email.com",
+            password=make_password("senha123"),
+            role="USER",
+        )
+        self.user_token, _ = token_generator(self.user)
+        self.user_headers = {"HTTP_AUTHORIZATION": f"Bearer {self.user_token}"}
 
     def _falso_modelo(self, textos):
         return [NEUTRO] * len(textos), [0.9] * len(textos)
 
-    def test_upload_classifica_e_responde(self):
+    def test_upload_sem_token_bloqueia_401(self):
         arquivo = SimpleUploadedFile("novo.csv", CSV.encode(), content_type="text/csv")
+        r = self.client.post("/api/upload", {"arquivo": arquivo, "fonte": "via-api"})
+        self.assertEqual(r.status_code, 401)
+
+    def test_upload_com_role_user_bloqueia_403(self):
+        arquivo = SimpleUploadedFile("novo.csv", CSV.encode(), content_type="text/csv")
+        r = self.client.post("/api/upload", {"arquivo": arquivo, "fonte": "via-api"}, **self.user_headers)
+        self.assertEqual(r.status_code, 403)
+
+    def test_upload_com_role_admin_sucesso_201(self):
+        arquivo = SimpleUploadedFile("novo.csv", CSV.encode(), content_type="text/csv")
+        r = self.client.post("/api/upload", {"arquivo": arquivo, "fonte": "via-api"}, **self.admin_headers)
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()["conversas"], 2)
+        self.assertEqual(r.json()["mensagens"], 3)
+        self.assertEqual(r.json()["status"], "importado")
+
+    def test_analisar_sem_token_bloqueia_401(self):
+        r = self.client.post(
+            "/api/conversas/analisar",
+            {"fonte": "teste", "modelo": "lexico"},
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 401)
+
+    def test_analisar_conversas_com_token_sucesso(self):
         with patch("analise.classificador.modelo") as m:
             m.return_value.prever.side_effect = self._falso_modelo
-            r = self.client.post("/api/upload", {"arquivo": arquivo, "fonte": "via-api"})
+            r = self.client.post(
+                "/api/conversas/analisar",
+                {"fonte": "teste", "modelo": "lexico"},
+                content_type="application/json",
+                **self.user_headers,
+            )
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["conversas"], 2)
-        self.assertEqual(r.json()["mensagens_classificadas"], 2)  # só mensagens de usuário
+        self.assertEqual(r.json()["fonte"], "teste")
+        self.assertEqual(r.json()["total_conversas"], 2)
+        self.assertEqual(r.json()["mensagens_classificadas"], 2)
+
+    def test_analisar_conversas_fonte_inexistente(self):
+        r = self.client.post(
+            "/api/conversas/analisar",
+            {"fonte": "inexistente"},
+            content_type="application/json",
+            **self.user_headers,
+        )
+        self.assertEqual(r.status_code, 404)
+
+    def test_analisar_conversas_modelo_invalido(self):
+        r = self.client.post(
+            "/api/conversas/analisar",
+            {"fonte": "teste", "modelo": "modelo_invalido"},
+            content_type="application/json",
+            **self.user_headers,
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_register_e_login(self):
+        r_reg = self.client.post(
+            "/api/register",
+            {"name": "Teste", "email": "teste@email.com", "password": "senha_segura"},
+            content_type="application/json",
+        )
+        self.assertEqual(r_reg.status_code, 201)
+        self.assertEqual(r_reg.json()["name"], "Teste")
+        self.assertNotIn("password", r_reg.json())
+
+        r_login = self.client.post(
+            "/api/login",
+            {"email": "teste@email.com", "password": "senha_segura"},
+            content_type="application/json",
+        )
+        self.assertEqual(r_login.status_code, 200)
+        self.assertIn("access_token", r_login.json())
+        self.assertIn("refresh_token", r_login.json())
 
     def test_upload_recusa_arquivo_invalido_sem_gravar(self):
         ruim = SimpleUploadedFile("ruim.csv", b"conversa_id,ordem\nc1,x\n", content_type="text/csv")
-        r = self.client.post("/api/upload", {"arquivo": ruim, "fonte": "ruim"})
+        r = self.client.post("/api/upload", {"arquivo": ruim, "fonte": "ruim"}, **self.admin_headers)
         self.assertEqual(r.status_code, 400)
         self.assertFalse(Conversa.objects.filter(fonte="ruim").exists())
 
     def test_upload_sem_arquivo(self):
-        self.assertEqual(self.client.post("/api/upload").status_code, 400)
+        self.assertEqual(self.client.post("/api/upload", **self.admin_headers).status_code, 400)
 
     def test_lista_conversas(self):
         r = self.client.get("/api/conversas")
