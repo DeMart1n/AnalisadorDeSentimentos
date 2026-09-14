@@ -34,7 +34,7 @@ Cria um novo usuário na aplicação com role padrão `USER`. A senha é armazen
 | Status | Quando | Formato |
 |---|---|---|
 | 201 | Usuário criado com sucesso | `{"name": "...", "email": "...", "role": "USER", "created_at": "..."}` |
-| 400 | Payload malformado ou campos inválidos/faltando | `{"erro": ["Name is required."]}` ou `{"erro": "JSON inválido: ..."}` |
+| 400 | Payload malformado ou campos inválidos/faltando | `{"erro": ["O campo 'name' é obrigatório."]}` ou `{"erro": "JSON inválido: ..."}` |
 
 ---
 
@@ -61,7 +61,7 @@ Autentica um usuário existente por e-mail e senha, gerando um par de tokens JWT
 | Status | Quando | Formato |
 |---|---|---|
 | 200 | Credenciais válidas | `{"email": "...", "access_token": "eyJhbGci...", "refresh_token": "eyJhbGci..."}` |
-| 401 | Credenciais inválidas | `{"erro": "Invalid email or password"}` |
+| 401 | Credenciais inválidas | `{"erro": "E-mail ou senha inválidos."}` |
 | 400 | Payload malformado ou campos faltando | `{"erro": [...]}` ou `{"erro": "JSON inválido: ..."}` |
 
 - **Access Token:** Validade de 1 hora (`type: "access"`).

@@ -38,24 +38,24 @@ def jwt_required(view_func):
     def wrapper(request, *args, **kwargs):
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return JsonResponse({"erro": "Invalid token"}, status=401)
+            return JsonResponse({"erro": "Token ausente ou inválido."}, status=401)
 
         partes = auth_header.split(" ")
         if len(partes) != 2:
-            return JsonResponse({"erro": "Invalid token"}, status=401)
+            return JsonResponse({"erro": "Token ausente ou inválido."}, status=401)
 
         token = partes[1]
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
             if payload.get("type") != "access":
-                return JsonResponse({"erro": "Invalid token"}, status=401)
+                return JsonResponse({"erro": "Token inválido."}, status=401)
 
             request.user_id = payload["user_id"]
             request.user_role = payload["role"]
         except jwt.ExpiredSignatureError:
-            return JsonResponse({"erro": "Token Expired"}, status=401)
+            return JsonResponse({"erro": "Token expirado."}, status=401)
         except jwt.InvalidTokenError:
-            return JsonResponse({"erro": "Invalid token"}, status=401)
+            return JsonResponse({"erro": "Token inválido."}, status=401)
 
         return view_func(request, *args, **kwargs)
 

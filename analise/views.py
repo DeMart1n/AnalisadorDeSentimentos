@@ -23,6 +23,8 @@ METRICAS = Path(__file__).resolve().parents[1] / "models" / "metricas.json"
 @require_POST
 def create(request):
     try:
+        if not request.body:
+            return JsonResponse({"erro": "Corpo da requisição vazio."}, status=400)
         data = json.loads(request.body)
         dto = CreateUserDTO.from_dict(data)
         user = Users.objects.create(
@@ -41,11 +43,13 @@ def create(request):
 @require_POST
 def login(request):
     try:
+        if not request.body:
+            return JsonResponse({"erro": "Corpo da requisição vazio."}, status=400)
         data = json.loads(request.body)
         dto = LoginUserDTO.from_dict(data)
         user = Users.objects.filter(email=dto.email).first()
         if not user or not check_password(dto.password, user.password):
-            return JsonResponse({"erro": "Invalid email or password"}, status=401)
+            return JsonResponse({"erro": "E-mail ou senha inválidos."}, status=401)
         access_token, refresh_token = token_generator(user)
         return JsonResponse(
             LoginOutputDTO.from_user(user, access_token, refresh_token).to_dict(),
@@ -90,6 +94,8 @@ def upload(request):
 @jwt_required
 def analisar(request):
     try:
+        if not request.body:
+            return JsonResponse({"erro": "Corpo da requisição vazio. Envie um JSON com 'fonte' ou 'conversa_ids'."}, status=400)
         data = json.loads(request.body)
         dto = AnalisarConversasDTO.from_dict(data)
 

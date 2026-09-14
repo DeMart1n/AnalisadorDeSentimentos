@@ -16,7 +16,7 @@ class AnalisarConversasDTO:
     @classmethod
     def from_dict(cls, data: Any) -> "AnalisarConversasDTO":
         if not isinstance(data, dict):
-            raise ValueError(["Invalid payload."])
+            raise ValueError(["Payload inválido."])
 
         erros = []
 
@@ -40,9 +40,13 @@ class AnalisarConversasDTO:
             else:
                 conversa_ids = raw_ids
 
-        modelo = str(data.get("modelo", STANDARD_MODEL)).strip().lower()
-        if modelo not in ALLOWED_MODELS:
-            erros.append(f"Modelo inválido '{modelo}'. Modelos válidos: {', '.join(ALLOWED_MODELS)}.")
+        raw_modelo = data.get("modelo")
+        if raw_modelo is not None:
+            modelo = str(raw_modelo).strip().lower()
+            if modelo not in ALLOWED_MODELS:
+                erros.append(f"Modelo inválido '{modelo}'. Modelos válidos: {', '.join(ALLOWED_MODELS)}.")
+        else:
+            modelo = STANDARD_MODEL
 
         apenas_nao_classificadas = data.get("apenas_nao_classificadas", True)
         if not isinstance(apenas_nao_classificadas, bool):

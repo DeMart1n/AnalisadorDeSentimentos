@@ -10,27 +10,25 @@ class LoginUserDTO:
     @classmethod
     def from_dict(cls, data: Any) -> "LoginUserDTO":
         if not isinstance(data, dict):
-            raise ValueError(["Invalid payload."])
+            raise ValueError(["Payload inválido."])
 
         erros = []
 
         raw_email = data.get("email")
         if not raw_email:
-            erros.append("Email is required.")
+            erros.append("O campo 'email' é obrigatório.")
         elif not isinstance(raw_email, str):
-            erros.append("Email must be a string.")
-        elif '@' not in raw_email:
-            erros.append("Email must be a valid email.")
-        elif '.' not in raw_email:
-            erros.append("Email must be a valid email.")
+            erros.append("O campo 'email' deve ser uma string.")
+        elif '@' not in raw_email or '.' not in raw_email:
+            erros.append("O campo 'email' deve ser um e-mail válido.")
 
         raw_password = data.get("password")
         if not raw_password:
-            erros.append("Password is required.")
+            erros.append("O campo 'password' é obrigatório.")
         elif not isinstance(raw_password, str):
-            erros.append("Password must be a string.")
+            erros.append("O campo 'password' deve ser uma string.")
         elif len(raw_password) < 6:
-            erros.append(f"Password must be at least 6 characters.")
+            erros.append("A senha deve ter no mínimo 6 caracteres.")
 
         if erros:
             raise ValueError(erros)
