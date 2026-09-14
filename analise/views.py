@@ -9,10 +9,51 @@ from django.views.decorators.http import require_GET, require_POST
 from .classificador import classificar_conversas
 from .importacao import ErroDeImportacao, importar
 from .indicadores import indicadores
-from .models import USUARIO, Conversa, Mensagem
+from .models import USUARIO, Conversa, Mensagem, Users
+from .dtos.create_user_dto import CreateUserDTO, UserOutputDTO
+from .dtos.login_dto import LoginUserDTO, LoginOutputDTO
+from django.contrib.auth.hashers import make_password, check_password
+from .auth import token_generator
 
 METRICAS = Path(__file__).resolve().parents[1] / "models" / "metricas.json"
 
+
+@csrf_exempt
+@require_POST
+def create(request):
+    try:
+        data = json.loads(request.body)
+        dto = CreateUserDTO.from_dict(data)
+        user = Users.objects.create(
+            name=dto.name,
+            email=dto.email,
+            password=make_password(dto.password),
+            role=dto.role,
+        )
+        return JsonResponse(UserOutputDTO.from_model(user).to_dict(), status=201)
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+
+@csrf_exempt
+@require_POST
+def login(request):
+    try:
+        data = json.loads(request.body)
+        dto = LoginUserDTO.from_dict(data)
+        user = Users.objects.filter(email=dto.email).first()
+        if not user or not check_password(dto.password, user.password):
+            return JsonResponse({"erro": "Invalid email or password"}, status=401)
+        access_token, refresh_token = token_generator(user)
+        return JsonResponse(
+            LoginOutputDTO.from_user(user, access_token, refresh_token).to_dict(),
+            status=200
+        )
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
 
 @csrf_exempt  # ponytail: app local sem autenticação nem sessão. Reativar CSRF quando entrar auth ou dado real de empresa.
 @require_POST

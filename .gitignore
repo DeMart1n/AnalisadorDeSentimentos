@@ -17,3 +17,5 @@ models/bertimbau/
 
 # macOS
 .DS_Store
+
+.env

@@ -1,10 +1,71 @@
 # API
 
-JSON puro sobre Django views. Sem DRF, sem autenticação, sem paginação por cursor — app local
-single-user. Base: `http://localhost:8000/api`.
+JSON puro sobre Django views. Sem DRF, autenticação stateless via JWT (`PyJWT`), sem paginação por cursor. Base: `http://localhost:8000/api`.
 
-Todas as respostas de erro têm a forma `{"erro": "...", "detalhes": [...]}`, com `detalhes`
-apenas quando há uma lista de problemas (validação de arquivo).
+Todas as respostas de erro têm a forma `{"erro": "..."}` (ou com `"detalhes": [...]` quando há lista de validações de arquivo).
+
+Para endpoints protegidos com `@jwt_required`, envie o cabeçalho:
+`Authorization: Bearer <access_token>`
+
+---
+
+## `POST /api/register`
+
+Cria um novo usuário na aplicação com role padrão `USER`. A senha é armazenada com hash seguro (`make_password`). `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+| Campo | Obrigatório | Tipo | Descrição |
+|---|---|---|---|
+| `name` | sim | string | Nome do usuário |
+| `email` | sim | string | E-mail válido e único |
+| `password` | sim | string | Senha com no mínimo 6 caracteres |
+
+### Payload de exemplo
+
+```json
+{
+  "name": "Luiz Felipe",
+  "email": "luiz@email.com",
+  "password": "luiz1234"
+}
+```
+
+### Resposta
+
+| Status | Quando | Formato |
+|---|---|---|
+| 201 | Usuário criado com sucesso | `{"name": "...", "email": "...", "role": "USER", "created_at": "..."}` |
+| 400 | Payload malformado ou campos inválidos/faltando | `{"erro": ["Name is required."]}` ou `{"erro": "JSON inválido: ..."}` |
+
+---
+
+## `POST /api/login`
+
+Autentica um usuário existente por e-mail e senha, gerando um par de tokens JWT (`access_token` e `refresh_token`). `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+| Campo | Obrigatório | Tipo | Descrição |
+|---|---|---|---|
+| `email` | sim | string | E-mail cadastrado |
+| `password` | sim | string | Senha do usuário |
+
+### Payload de exemplo
+
+```json
+{
+  "email": "luiz@email.com",
+  "password": "luiz1234"
+}
+```
+
+### Resposta
+
+| Status | Quando | Formato |
+|---|---|---|
+| 200 | Credenciais válidas | `{"email": "...", "access_token": "eyJhbGci...", "refresh_token": "eyJhbGci..."}` |
+| 401 | Credenciais inválidas | `{"erro": "Invalid email or password"}` |
+| 400 | Payload malformado ou campos faltando | `{"erro": [...]}` ou `{"erro": "JSON inválido: ..."}` |
+
+- **Access Token:** Validade de 1 hora (`type: "access"`).
+- **Refresh Token:** Validade de 7 dias (`type: "refresh"`).
 
 ---
 
@@ -175,4 +236,5 @@ O `metricas.json` em disco hoje contém apenas **léxico e clássico** — a úl
   incomodar, aí entra cursor.
 - **`GET /api/conversas` faz `prefetch_related`** e calcula indicadores em Python. Com milhares
   de conversas por página isso pesa — materializar os indicadores é a saída, e só quando doer.
-- **Nenhuma rota escreve exceto `/upload`.**
+- **Rotas de escrita:** `/upload` (multipart), `/register` (JSON) e `/login` (JSON).
+- **Autenticação Stateless:** JWT (`PyJWT`) com `access_token` (1h) e `refresh_token` (7d). Proteção de rotas com `@jwt_required` checando o cabeçalho `Authorization: Bearer <token>`.

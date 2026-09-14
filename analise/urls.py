@@ -7,4 +7,6 @@ urlpatterns = [
     path("conversas", views.conversas),
     path("conversas/<int:conversa_id>", views.conversa),
     path("metricas", views.metricas),
+    path("register", views.create),
+    path("login", views.login),
 ]

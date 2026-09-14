@@ -10,6 +10,7 @@ services:
       - DEBUG=True
       - DJANGO_ALLOWED_HOSTS=*
       - DATABASE_PATH=/app/data/db.sqlite3
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
     restart: unless-stopped
     volumes:
       - ./analise:/app/analise
