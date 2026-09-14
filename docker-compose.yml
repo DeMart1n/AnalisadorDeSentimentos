@@ -1,0 +1,19 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile
+    container_name: analisador_sentimentos_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DJANGO_ALLOWED_HOSTS=*
+      - DATABASE_PATH=/app/data/db.sqlite3
+    restart: unless-stopped
+    volumes:
+      - ./analise:/app/analise
+      - ./AnalisadorDeSentimentos:/app/AnalisadorDeSentimentos
+      - ./manage.py:/app/manage.py
+      - ./data:/app/data
+      - ./models:/app/models
