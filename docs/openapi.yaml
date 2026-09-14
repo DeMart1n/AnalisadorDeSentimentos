@@ -111,6 +111,54 @@ paths:
               example:
                 erro: "E-mail ou senha inválidos."
 
+  /refresh:
+    post:
+      tags:
+        - Autenticação
+      summary: Renovar tokens de acesso (Refresh Token)
+      description: Recebe um refresh token válido e emite um novo par de tokens JWT (access token com validade de 1 hora e novo refresh token com validade de 7 dias).
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+            example:
+              refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        '200':
+          description: Tokens renovados com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenOutput'
+              example:
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        '400':
+          description: Payload malformado ou campo refresh_token ausente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Refresh token expirado, inválido ou de tipo incorreto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "Refresh token expirado."
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "Usuário não encontrado."
+
   /upload:
     post:
       tags:
@@ -470,6 +518,26 @@ components:
           type: string
         refresh_token:
           type: string
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          description: Token de renovação JWT emitido no login ou na última renovação
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+    RefreshTokenOutput:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: Novo token de acesso com 1 hora de validade
+        refresh_token:
+          type: string
+          description: Novo token de renovação com 7 dias de validade (rotação de tokens)
 
     UploadOutput:
       type: object

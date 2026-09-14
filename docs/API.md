@@ -1,7 +1,6 @@
 # API
 
 JSON puro sobre Django views. Sem DRF, autenticação stateless via JWT (`PyJWT`), sem paginação por cursor. Base: `http://localhost:8000/api`.
-Uma coleção pronta e completa para o **Bruno** está disponível em [`bruno-collection/`](../bruno-collection/) com ambientes, testes automáticos e captura dinâmica de tokens.
 A documentação interativa moderna via **Scalar (OpenAPI 3.1)** está disponível em `http://localhost:8000/api/docs` (e a especificação em `http://localhost:8000/api/openapi.yaml`).
 
 Todas as respostas de erro têm a forma `{"erro": "..."}` (ou com `"detalhes": [...]` quando há lista de validações de arquivo).
@@ -68,6 +67,33 @@ Autentica um usuário existente por e-mail e senha, gerando um par de tokens JWT
 
 - **Access Token:** Validade de 1 hora (`type: "access"`).
 - **Refresh Token:** Validade de 7 dias (`type: "refresh"`).
+
+---
+
+## `POST /api/refresh`
+
+Renova o par de tokens JWT sem necessidade de informar credenciais novamente (Refresh Token Rotation). `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+| Campo | Obrigatório | Tipo | Descrição |
+|---|---|---|---|
+| `refresh_token` | sim | string | Token de renovação emitido no login ou último refresh |
+
+### Payload de exemplo
+
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Resposta
+
+| Status | Quando | Formato |
+|---|---|---|
+| 200 | Token válido e renovado com sucesso | `{"access_token": "eyJhbGci...", "refresh_token": "eyJhbGci..."}` |
+| 401 | Token expirado, com assinatura inválida ou de tipo incorreto | `{"erro": "Refresh token expirado."}` |
+| 404 | Usuário do token não encontrado no banco | `{"erro": "Usuário não encontrado."}` |
+| 400 | Payload malformado ou sem campo `refresh_token` | `{"erro": [...]}` ou `{"erro": "JSON inválido: ..."}` |
 
 ---
 

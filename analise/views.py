@@ -10,11 +10,12 @@ from .classificador import classificar_conversas
 from .importacao import ErroDeImportacao, importar
 from .indicadores import indicadores
 from .models import USUARIO, Conversa, Mensagem, Users
-from .dtos.create_user_dto import CreateUserDTO, UserOutputDTO
-from .dtos.login_dto import LoginUserDTO, LoginOutputDTO
+from .dtos.user.create_user_dto import CreateUserDTO, UserOutputDTO
+from .dtos.user.login_dto import LoginUserDTO, LoginOutputDTO
+from .dtos.user.refresh_token_dto import RefreshTokenDTO, RefreshTokenOutputDTO
 from .dtos.analise_dto import AnalisarConversasDTO, AnalisarConversasOutputDTO
 from django.contrib.auth.hashers import make_password, check_password
-from .auth import token_generator, jwt_required, admin_required
+from .auth import token_generator, decode_refresh_token, jwt_required, admin_required
 
 METRICAS = Path(__file__).resolve().parents[1] / "models" / "metricas.json"
 OPENAPI_PATH = Path(__file__).resolve().parents[1] / "docs" / "openapi.yaml"
@@ -59,6 +60,35 @@ def login(request):
         return JsonResponse({"erro": e.args[0]}, status=400)
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+
+@csrf_exempt
+@require_POST
+def refresh(request):
+    try:
+        if not request.body:
+            return JsonResponse({"erro": "Corpo da requisição vazio."}, status=400)
+        data = json.loads(request.body)
+        dto = RefreshTokenDTO.from_dict(data)
+
+        payload, erro = decode_refresh_token(dto.refresh_token)
+        if erro:
+            return JsonResponse({"erro": erro}, status=401)
+
+        user = Users.objects.filter(id=payload.get("user_id")).first()
+        if not user:
+            return JsonResponse({"erro": "Usuário não encontrado."}, status=404)
+
+        access_token, new_refresh_token = token_generator(user)
+        output = RefreshTokenOutputDTO(
+            access_token=access_token,
+            refresh_token=new_refresh_token,
+        )
+        return JsonResponse(output.to_dict(), status=200)
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+
 
 @csrf_exempt  # ponytail: app local sem autenticação nem sessão. Reativar CSRF quando entrar auth ou dado real de empresa.
 @require_POST

@@ -249,6 +249,59 @@ class ApiTest(TestCase):
         self.assertIn("access_token", r_login.json())
         self.assertIn("refresh_token", r_login.json())
 
+    def test_refresh_token_sucesso(self):
+        r_login = self.client.post(
+            "/api/login",
+            {"email": "user@email.com", "password": "senha123"},
+            content_type="application/json",
+        )
+        self.assertEqual(r_login.status_code, 200)
+        refresh_token = r_login.json()["refresh_token"]
+
+        r_refresh = self.client.post(
+            "/api/refresh",
+            {"refresh_token": refresh_token},
+            content_type="application/json",
+        )
+        self.assertEqual(r_refresh.status_code, 200)
+        self.assertIn("access_token", r_refresh.json())
+        self.assertIn("refresh_token", r_refresh.json())
+        self.assertTrue(r_refresh.json()["access_token"])
+
+    def test_refresh_token_invalido(self):
+        r = self.client.post(
+            "/api/refresh",
+            {"refresh_token": "token_completamente_invalido.123"},
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 401)
+        self.assertEqual(r.json()["erro"], "Refresh token inválido.")
+
+    def test_refresh_rejeita_access_token(self):
+        r_login = self.client.post(
+            "/api/login",
+            {"email": "user@email.com", "password": "senha123"},
+            content_type="application/json",
+        )
+        self.assertEqual(r_login.status_code, 200)
+        access_token = r_login.json()["access_token"]
+
+        r = self.client.post(
+            "/api/refresh",
+            {"refresh_token": access_token},
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 401)
+        self.assertEqual(r.json()["erro"], "Token inválido para esta operação.")
+
+    def test_refresh_payload_vazio(self):
+        r = self.client.post(
+            "/api/refresh",
+            {},
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 400)
+
     def test_upload_recusa_arquivo_invalido_sem_gravar(self):
         ruim = SimpleUploadedFile("ruim.csv", b"conversa_id,ordem\nc1,x\n", content_type="text/csv")
         r = self.client.post("/api/upload", {"arquivo": ruim, "fonte": "ruim"}, **self.admin_headers)

@@ -32,6 +32,16 @@ def token_generator(user: Users) -> tuple[str, str]:
 
     return access_token, refresh_token
 
+def decode_refresh_token(token: str) -> tuple[dict | None, str | None]:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+        if payload.get("type") != "refresh":
+            return None, "Token inválido para esta operação."
+        return payload, None
+    except jwt.ExpiredSignatureError:
+        return None, "Refresh token expirado."
+    except jwt.InvalidTokenError:
+        return None, "Refresh token inválido."
 
 def jwt_required(view_func):
     @wraps(view_func)
