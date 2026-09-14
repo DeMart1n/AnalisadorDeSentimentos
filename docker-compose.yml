@@ -18,3 +18,4 @@ services:
       - ./manage.py:/app/manage.py
       - ./data:/app/data
       - ./models:/app/models
+      - ./docs:/app/docs

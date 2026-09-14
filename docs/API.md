@@ -1,7 +1,8 @@
 # API
 
 JSON puro sobre Django views. Sem DRF, autenticação stateless via JWT (`PyJWT`), sem paginação por cursor. Base: `http://localhost:8000/api`.
-Uma coleção pronta e completa para o **Bruno** está disponível em [`bruno/`](../bruno/) com ambientes, testes automáticos e captura dinâmica de tokens.
+Uma coleção pronta e completa para o **Bruno** está disponível em [`bruno-collection/`](../bruno-collection/) com ambientes, testes automáticos e captura dinâmica de tokens.
+A documentação interativa moderna via **Scalar (OpenAPI 3.1)** está disponível em `http://localhost:8000/api/docs` (e a especificação em `http://localhost:8000/api/openapi.yaml`).
 
 Todas as respostas de erro têm a forma `{"erro": "..."}` (ou com `"detalhes": [...]` quando há lista de validações de arquivo).
 
@@ -273,6 +274,18 @@ colunas = predito.
 O `metricas.json` em disco hoje contém apenas **léxico e clássico** — a última execução com
 `--salvar` não incluiu o BERTimbau. Reexecutar `avaliar --modelos lexico classico bertimbau
 --salvar` para o comparativo ficar completo.
+
+---
+
+## `GET /api/openapi.yaml`
+
+Retorna a especificação estática da API no padrão **OpenAPI 3.1** em formato YAML, contendo todos os esquemas de dados, exemplos, códigos de retorno e autenticação.
+
+---
+
+## `GET /api/docs`
+
+Interface web moderna e interativa gerada pelo **Scalar** (`@scalar/api-reference`), com cliente HTTP integrado para testes, suporte a temas (dark mode) e documentação de todos os endpoints.
 
 ---
 

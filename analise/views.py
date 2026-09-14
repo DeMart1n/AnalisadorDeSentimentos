@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from django.db.models import Count
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -17,7 +17,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from .auth import token_generator, jwt_required, admin_required
 
 METRICAS = Path(__file__).resolve().parents[1] / "models" / "metricas.json"
-
+OPENAPI_PATH = Path(__file__).resolve().parents[1] / "docs" / "openapi.yaml"
 
 @csrf_exempt
 @require_POST
@@ -182,3 +182,53 @@ def metricas(request):
         "total_conversas": Conversa.objects.count(),
         "modelos": modelos,
     })
+
+
+# DOCUMENTACAO
+def _obter_openapi_conteudo():
+    if OPENAPI_PATH.exists():
+        return OPENAPI_PATH.read_text(encoding="utf-8")
+    fallback = Path("/app/docs/openapi.yaml")
+    if fallback.exists():
+        return fallback.read_text(encoding="utf-8")
+    return None
+
+@require_GET
+def openapi_spec(request):
+    conteudo = _obter_openapi_conteudo()
+    if not conteudo:
+        return JsonResponse({"erro": "Arquivo de especificação OpenAPI não encontrado."}, status=404)
+    return HttpResponse(
+        conteudo,
+        content_type="text/yaml; charset=utf-8",
+    )
+
+@require_GET
+def docs(request):
+    html = """<!doctype html>
+<html>
+  <head>
+    <title>API Reference — Analisador de Sentimentos</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script>
+      Scalar.createApiReference('#app', {
+        url: '/api/openapi.yaml',
+        theme: 'purple',
+        layout: 'modern',
+        darkMode: true
+      })
+    </script>
+  </body>
+</html>"""
+    return HttpResponse(html, content_type="text/html; charset=utf-8")

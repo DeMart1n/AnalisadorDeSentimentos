@@ -276,3 +276,16 @@ class ApiTest(TestCase):
         r = self.client.get("/api/metricas")
         self.assertEqual(r.status_code, 200)
         self.assertIn("distribuicao", r.json())
+
+    def test_openapi_spec(self):
+        r = self.client.get("/api/openapi.yaml")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("text/yaml", r.headers.get("Content-Type", ""))
+        self.assertIn("openapi: 3.1.0", r.content.decode("utf-8"))
+
+    def test_docs(self):
+        r = self.client.get("/api/docs")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("text/html", r.headers.get("Content-Type", ""))
+        self.assertIn("@scalar/api-reference", r.content.decode("utf-8"))
+        self.assertIn("/api/openapi.yaml", r.content.decode("utf-8"))

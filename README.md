@@ -16,7 +16,8 @@ camada de apresentação em cima do resultado.
 | [docs/TREINAMENTO.md](docs/TREINAMENTO.md) | Dados, pré-processamento, hiperparâmetros, reprodução |
 | [docs/RESULTADOS.md](docs/RESULTADOS.md) | Métricas, matrizes de confusão, McNemar, análise de erro |
 | [docs/API.md](docs/API.md) | Os endpoints REST, formatos de request/response e autenticação |
-| [bruno/](bruno/) | Coleção Bruno completa com testes, scripts de token e ambientes |
+| [docs/openapi.yaml](docs/openapi.yaml) | Especificação OpenAPI 3.1 servida com interface interativa **Scalar** em `/api/docs` |
+| [bruno-collection/](bruno-collection/) | Coleção Bruno completa com testes, scripts de token e ambientes |
 | [docs/relatorio/](docs/relatorio/00-VISAO-GERAL.md) | Relatório do sistema por módulo: [frontend](docs/relatorio/01-FRONTEND.md), [backend](docs/relatorio/02-BACKEND.md), [modelo IA](docs/relatorio/03-MODELO-IA.md) |
 
 ## Estado atual
@@ -49,6 +50,8 @@ gerar os dois do zero, veja [docs/TREINAMENTO.md](docs/TREINAMENTO.md).
 ```bash
 uv run manage.py runserver
 ```
+
+Acesse a documentação interativa em: **http://localhost:8000/api/docs** (Scalar) ou a especificação em **http://localhost:8000/api/openapi.yaml**.
 
 ```bash
 curl -F arquivo=@conversas.csv -F fonte=piloto http://localhost:8000/api/upload
