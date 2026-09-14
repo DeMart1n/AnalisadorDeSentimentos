@@ -1,8 +1,0 @@
-conversa_id,ordem,autor,texto,timestamp,rotulo
-c1,1,sistema,Olá! Você está na fila de atendimento.,2026-01-02T10:00:00,
-c1,2,usuario,Demorou demais para me atenderem, estou insatisfeito com a demora.,2026-01-02T10:01:00,negativo
-c1,3,atendente,Peço desculpas pela espera. Em que posso te ajudar hoje?,2026-01-02T10:02:00,
-c1,4,usuario,Muito obrigado pelo suporte, resolveu perfeitamente meu problema!,2026-01-02T10:05:00,positivo
-c2,1,usuario,Gostaria de consultar o status do pedido 4512.,2026-01-02T11:00:00,neutro
-c2,2,atendente,Seu pedido foi despachado hoje cedo pela transportadora.,2026-01-02T11:01:00,
-c2,3,usuario,Excelente notícia, muito agradecido!,2026-01-02T11:02:00,positivo
