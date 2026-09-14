@@ -1,0 +1,48 @@
+meta {
+  name: 3. Obter Detalhes da Conversa por ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/conversas/{{conversaId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("Status code deve ser 200 OK (ou 404 se ID não existir)", function() {
+    expect([200, 404]).to.include(res.getStatus());
+  });
+
+  test("Se conversa encontrada (200), valida histórico de mensagens", function() {
+    if (res.getStatus() === 200) {
+      const data = res.getBody();
+      expect(data).to.have.property("id");
+      expect(data).to.have.property("origem_id");
+      expect(data).to.have.property("fonte");
+      expect(data).to.have.property("mensagens");
+      expect(data.mensagens).to.be.an("array");
+
+      if (data.mensagens.length > 0) {
+        const msg = data.mensagens[0];
+        expect(msg).to.have.property("ordem");
+        expect(msg).to.have.property("autor");
+        expect(msg).to.have.property("texto");
+        expect(msg).to.have.property("rotulo");
+        expect(msg).to.have.property("score");
+        expect(msg).to.have.property("rotulo_real");
+      }
+    }
+  });
+}
+
+docs {
+  # GET /api/conversas/:id
+
+  Retorna todos os detalhes de uma conversa, incluindo indicadores calculados e o fluxo cronológico de mensagens trocadas com o rótulo de sentimento previsto (`rotulo`), score de confiança e rótulo real (quando disponível).
+
+  ### Respostas
+  - `200 OK`: Conversa e mensagens localizadas.
+  - `404 Not Found`: ID de conversa não encontrado (`{"erro": "conversa não encontrada"}`).
+}

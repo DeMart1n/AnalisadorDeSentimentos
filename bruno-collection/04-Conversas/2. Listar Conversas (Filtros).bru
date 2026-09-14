@@ -1,0 +1,35 @@
+meta {
+  name: 2. Listar Conversas (Filtradas por Fonte)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/conversas?fonte={{fonte}}&limite=20
+  body: none
+  auth: none
+}
+
+params:query {
+  fonte: {{fonte}}
+  limite: 20
+}
+
+tests {
+  test("Status code deve ser 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Valida resposta filtrada", function() {
+    const data = res.getBody();
+    expect(data).to.have.property("total");
+    expect(data).to.have.property("conversas");
+    expect(data.conversas).to.be.an("array");
+  });
+}
+
+docs {
+  # GET /api/conversas (Com Filtros)
+
+  Permite consultar conversas filtradas por uma fonte específica (ex: `piloto`, `b2w`, `olist`) e com limite customizado.
+}

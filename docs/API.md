@@ -1,6 +1,7 @@
 # API
 
 JSON puro sobre Django views. Sem DRF, autenticação stateless via JWT (`PyJWT`), sem paginação por cursor. Base: `http://localhost:8000/api`.
+Uma coleção pronta e completa para o **Bruno** está disponível em [`bruno/`](../bruno/) com ambientes, testes automáticos e captura dinâmica de tokens.
 
 Todas as respostas de erro têm a forma `{"erro": "..."}` (ou com `"detalhes": [...]` quando há lista de validações de arquivo).
 

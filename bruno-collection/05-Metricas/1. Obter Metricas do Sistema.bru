@@ -1,0 +1,34 @@
+meta {
+  name: 1. Obter Métricas do Sistema
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/metricas
+  body: none
+  auth: none
+}
+
+tests {
+  test("Status code deve ser 200 OK", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("Valida estrutura de métricas do sistema", function() {
+    const data = res.getBody();
+    expect(data).to.have.property("distribuicao");
+    expect(data).to.have.property("total_conversas");
+    expect(data).to.have.property("modelos");
+    expect(data.total_conversas).to.be.a("number");
+  });
+}
+
+docs {
+  # GET /api/metricas
+
+  Retorna um panorama consolidado do sistema contendo:
+  1. **Distribuição em tempo real:** Contagem das predições (`rotulo_pred`) agregadas das mensagens de usuário no banco.
+  2. **Total de conversas:** Volume global de atendimentos importados.
+  3. **Avaliação dos modelos:** Métricas do benchmark salvo em `models/metricas.json` (F1-Score Macro, Matriz de Confusão e Teste de McNemar comparativo).
+}

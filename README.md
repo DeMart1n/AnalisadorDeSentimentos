@@ -15,7 +15,8 @@ camada de apresentação em cima do resultado.
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | Estrutura do código, modelo de dados, fluxo |
 | [docs/TREINAMENTO.md](docs/TREINAMENTO.md) | Dados, pré-processamento, hiperparâmetros, reprodução |
 | [docs/RESULTADOS.md](docs/RESULTADOS.md) | Métricas, matrizes de confusão, McNemar, análise de erro |
-| [docs/API.md](docs/API.md) | Os 4 endpoints, formatos de request/response |
+| [docs/API.md](docs/API.md) | Os endpoints REST, formatos de request/response e autenticação |
+| [bruno/](bruno/) | Coleção Bruno completa com testes, scripts de token e ambientes |
 | [docs/relatorio/](docs/relatorio/00-VISAO-GERAL.md) | Relatório do sistema por módulo: [frontend](docs/relatorio/01-FRONTEND.md), [backend](docs/relatorio/02-BACKEND.md), [modelo IA](docs/relatorio/03-MODELO-IA.md) |
 
 ## Estado atual

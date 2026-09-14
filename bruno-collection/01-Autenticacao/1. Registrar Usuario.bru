@@ -1,0 +1,61 @@
+meta {
+  name: 1. Registrar Usuário
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/register
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "name": "Administrador do Sistema",
+    "email": "admin@empresa.com",
+    "password": "senhaForte123"
+  }
+}
+
+tests {
+  test("Status code deve ser 201 Created (ou 400 se já cadastrado)", function() {
+    expect([201, 400]).to.include(res.getStatus());
+  });
+
+  test("Se criado com sucesso (201), valida estrutura do usuário", function() {
+    if (res.getStatus() === 201) {
+      const data = res.getBody();
+      expect(data).to.have.property("name");
+      expect(data).to.have.property("email");
+      expect(data).to.have.property("role");
+      expect(data).to.have.property("created_at");
+      expect(data.role).to.equal("USER");
+    }
+  });
+}
+
+docs {
+  # POST /api/register
+
+  Cria um novo usuário na aplicação com role padrão `USER`.
+  A senha é armazenada com hash criptográfico seguro (`make_password`).
+
+  ### Cabeçalhos
+  - `Content-Type: application/json`
+
+  ### Parâmetros do Payload (JSON)
+  | Campo | Obrigatório | Tipo | Descrição |
+  |---|---|---|---|
+  | `name` | Sim | String | Nome completo do usuário |
+  | `email` | Sim | String | E-mail válido e único no sistema |
+  | `password` | Sim | String | Senha com no mínimo 6 caracteres |
+
+  ### Respostas
+  - `201 Created`: Usuário registrado com sucesso.
+  - `400 Bad Request`: Payload malformado, campo obrigatório ausente ou e-mail já em uso.
+}
