@@ -12,17 +12,17 @@ import csv
 import io
 import json
 from typing import Any, Dict, List, Optional, Set, Tuple
-
 from django.db import transaction
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import get_current_timezone, is_naive, make_aware
-
+from .anonimizador import anonimizar_texto, extrair_nomes_do_dialogo
 from .dtos.importacao_dto import ConversaImportadaDTO, MensagemImportadaDTO
 from .models import AUTORES, ROTULOS, Conversa, Mensagem
 
 AUTORES_VALIDOS = {a for a, _ in AUTORES}
 ROTULOS_VALIDOS = {r for r, _ in ROTULOS}
 
+# ALIASES
 PAPEIS_USUARIO = {"usuario", "cliente", "user", "customer", "consumidor", "client"}
 PAPEIS_ATENDENTE = {"atendente", "agente", "operador", "atendimento", "support", "analista", "agent"}
 PAPEIS_SISTEMA = {"sistema", "bot", "ura", "system", "ia", "virtual", "notificacao"}
@@ -241,12 +241,7 @@ def _construir_dtos_conversa(
 
         nomes_contexto: Set[str] = set()
         telefones_contexto: Set[str] = set()
-        mensagens_dto: List[MensagemImportadaDTO] = []
-
-        for seq, m in enumerate(msgs_ordenadas, start=1):
-            ordem_final = m["ordem_int"] if tem_ordem else seq
-
-            # Coletar contexto de nomes e telefones
+        for m in msgs:
             contato = m.get("contato")
             if contato and str(contato).strip():
                 nomes_contexto.add(str(contato).strip())
@@ -261,11 +256,23 @@ def _construir_dtos_conversa(
             if telefone and str(telefone).strip():
                 telefones_contexto.add(str(telefone).strip())
 
+        nomes_dialogo = extrair_nomes_do_dialogo(msgs_ordenadas)
+        nomes_contexto.update(nomes_dialogo)
+
+        mensagens_dto: List[MensagemImportadaDTO] = []
+        for seq, m in enumerate(msgs_ordenadas, start=1):
+            ordem_final = m["ordem_int"] if tem_ordem else seq
+            texto_anonimizado = anonimizar_texto(
+                m["texto"],
+                nomes_conhecidos=nomes_contexto,
+                telefones_conhecidos=telefones_contexto,
+            )
+
             mensagens_dto.append(
                 MensagemImportadaDTO(
                     ordem=ordem_final,
                     autor=m["autor_canonico"],
-                    texto=m["texto"],
+                    texto=texto_anonimizado,
                     enviada_em=m["dt_enviada"],
                     rotulo_real=m.get("rotulo") or None,
                 )

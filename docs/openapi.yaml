@@ -166,6 +166,8 @@ paths:
       summary: Upload de arquivo de conversas (CSV ou JSON)
       description: |
         Recebe um arquivo CSV ou JSON contendo histórico de mensagens e grava atomicamente no banco de dados.
+        Suporta esquemas legados e flexíveis com aliases de colunas, delimitadores `,` e `;`, e codificação UTF-8 (com ou sem BOM).
+        Aplica anonimização de dados pessoais sensíveis (LGPD / Privacy by Design) em memória antes da gravação (`[NOME]`, `[CPF]`, `[CNPJ]`, `[TELEFONE]`, `[EMAIL]`, `[CARTAO]`).
         Requer token JWT de um usuário com papel de administrador (`role: ADMIN`).
       operationId: uploadConversas
       security:
