@@ -1,0 +1,698 @@
+openapi: 3.1.0
+info:
+  title: API Analisador de Sentimentos
+  version: 1.0.0
+  description: |
+    API RESTful para análise de sentimento em atendimentos via chat (`positivo | negativo | neutro`),
+    com cálculo de indicadores de trajetória de sessão (abertura, encerramento, delta, trocas de polaridade)
+    e avaliação comparativa de modelos de IA (Léxico, TF-IDF + Regressão Logística e BERTimbau fine-tuned).
+
+    ### Autenticação
+    - As rotas protegidas utilizam tokens **JWT (Bearer Auth)**.
+    - Obtenha seu token através do endpoint `POST /api/login` e informe no cabeçalho `Authorization: Bearer <access_token>`.
+    - O endpoint de upload (`POST /api/upload`) requer a permissão de administrador (`role: ADMIN`).
+
+servers:
+  - url: http://localhost:8000/api
+    description: Servidor Local de Desenvolvimento
+
+tags:
+  - name: Autenticação
+    description: Cadastro de usuários e emissão de tokens JWT
+  - name: Upload
+    description: Upload e processamento atômico de arquivos de conversas
+  - name: Análise
+    description: Disparo da inferência de sentimentos nas mensagens por IA
+  - name: Conversas
+    description: Listagem de atendimentos, indicadores consolidados e timelines
+  - name: Métricas
+    description: Métricas agregadas do banco e benchmark offline dos modelos
+  - name: Documentação
+    description: Especificação e visualização OpenAPI
+
+paths:
+  /register:
+    post:
+      tags:
+        - Autenticação
+      summary: Cadastrar novo usuário
+      description: Cria uma conta de usuário na aplicação com role padrão `USER`. A senha é armazenada com hash seguro.
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+            example:
+              name: "Administrador do Sistema"
+              email: "admin@empresa.com"
+              password: "senhaForte123"
+      responses:
+        '201':
+          description: Usuário cadastrado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOutput'
+              example:
+                name: "Administrador do Sistema"
+                email: "admin@empresa.com"
+                role: "USER"
+                created_at: "2026-09-14T14:00:00Z"
+        '400':
+          description: Dados inválidos, campo ausente ou e-mail já cadastrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "O campo 'email' deve ser um e-mail válido."
+
+  /login:
+    post:
+      tags:
+        - Autenticação
+      summary: Autenticar usuário (Login)
+      description: Valida e-mail e senha e retorna um par de tokens JWT (`access_token` com validade de 1 hora e `refresh_token` com validade de 7 dias).
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: "admin@empresa.com"
+              password: "senhaForte123"
+      responses:
+        '200':
+          description: Autenticado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginOutput'
+              example:
+                email: "admin@empresa.com"
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        '400':
+          description: Payload malformado ou campos faltando
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: E-mail ou senha inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "E-mail ou senha inválidos."
+
+  /refresh:
+    post:
+      tags:
+        - Autenticação
+      summary: Renovar tokens de acesso (Refresh Token)
+      description: Recebe um refresh token válido e emite um novo par de tokens JWT (access token com validade de 1 hora e novo refresh token com validade de 7 dias).
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+            example:
+              refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        '200':
+          description: Tokens renovados com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenOutput'
+              example:
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        '400':
+          description: Payload malformado ou campo refresh_token ausente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Refresh token expirado, inválido ou de tipo incorreto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "Refresh token expirado."
+        '404':
+          description: Usuário não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "Usuário não encontrado."
+
+  /upload:
+    post:
+      tags:
+        - Upload
+      summary: Upload de arquivo de conversas (CSV ou JSON)
+      description: |
+        Recebe um arquivo CSV ou JSON contendo histórico de mensagens e grava atomicamente no banco de dados.
+        Requer token JWT de um usuário com papel de administrador (`role: ADMIN`).
+      operationId: uploadConversas
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                arquivo:
+                  type: string
+                  format: binary
+                  description: Arquivo CSV ou JSON codificado em UTF-8
+                fonte:
+                  type: string
+                  description: Identificador da base importada (se omitido, utiliza o nome do arquivo)
+                  example: "piloto"
+              required:
+                - arquivo
+      responses:
+        '201':
+          description: Arquivo validado e importado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadOutput'
+              example:
+                fonte: "piloto"
+                conversas: 2
+                mensagens: 7
+                status: "importado"
+        '400':
+          description: Erro de validação de esquema, UTF-8 inválido ou campo faltando
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "arquivo inválido"
+                detalhes: ["linha 2: autor inválido 'robo'"]
+        '401':
+          description: Token JWT ausente, inválido ou expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "Token ausente ou inválido."
+        '403':
+          description: Usuário não possui privilégios de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "Acesso negado."
+
+  /conversas/analisar:
+    post:
+      tags:
+        - Análise
+      summary: Classificar mensagens de conversas por IA
+      description: |
+        Dispara a classificação de sentimento (`positivo`, `negativo`, `neutro`) nas mensagens enviadas por usuários.
+        A inferência pode ser executada por uma base inteira (`fonte`) ou por uma lista de `conversa_ids`.
+      operationId: analisarConversas
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalisarConversasRequest'
+            example:
+              fonte: "piloto"
+              modelo: "lexico"
+              apenas_nao_classificadas: true
+      responses:
+        '200':
+          description: Inferência concluída com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalisarConversasOutput'
+              example:
+                fonte: "piloto"
+                total_conversas: 2
+                mensagens_classificadas: 4
+                modelo_utilizado: "lexico"
+        '400':
+          description: Payload inválido ou modelo não suportado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Não autorizado (Token ausente ou inválido)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Nenhuma conversa encontrada para os critérios informados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "Nenhuma conversa encontrada para os critérios informados."
+
+  /conversas:
+    get:
+      tags:
+        - Conversas
+      summary: Listar conversas com indicadores de sessão
+      description: Retorna uma listagem paginada de conversas com os indicadores de abertura, encerramento, delta e pior momento.
+      operationId: listarConversas
+      parameters:
+        - name: fonte
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filtra as conversas pela base/fonte
+          example: "piloto"
+        - name: limite
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+          description: Quantidade máxima de registros retornados
+          example: 50
+      responses:
+        '200':
+          description: Lista de conversas retornada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversasResponse'
+              example:
+                total: 1
+                conversas:
+                  - id: 1
+                    origem_id: "c1"
+                    fonte: "piloto"
+                    indicadores:
+                      abertura: "negativo"
+                      encerramento: "positivo"
+                      delta: 2
+                      trocas_de_polaridade: 1
+                      pior_momento: 1
+                      n_mensagens: 2
+
+  /conversas/{conversa_id}:
+    get:
+      tags:
+        - Conversas
+      summary: Obter detalhes e histórico de uma conversa
+      description: Retorna todas as mensagens da conversa ordenadas cronologicamente, com rótulos de sentimento preditos, scores e rótulo real (quando existente).
+      operationId: obterConversaPorId
+      parameters:
+        - name: conversa_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: ID da conversa no banco de dados
+          example: 1
+      responses:
+        '200':
+          description: Detalhes da conversa encontrados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversaDetalheResponse'
+              example:
+                id: 1
+                origem_id: "c1"
+                fonte: "piloto"
+                indicadores:
+                  abertura: "negativo"
+                  encerramento: "positivo"
+                  delta: 2
+                  trocas_de_polaridade: 1
+                  pior_momento: 1
+                  n_mensagens: 2
+                mensagens:
+                  - ordem: 1
+                    autor: "sistema"
+                    texto: "Você está na fila."
+                    rotulo: null
+                    score: null
+                    rotulo_real: null
+                  - ordem: 2
+                    autor: "usuario"
+                    texto: "Demorou demais!"
+                    rotulo: "negativo"
+                    score: 0.97
+                    rotulo_real: "negativo"
+                  - ordem: 3
+                    autor: "usuario"
+                    texto: "Obrigado, resolveu meu problema!"
+                    rotulo: "positivo"
+                    score: 0.99
+                    rotulo_real: "positivo"
+        '404':
+          description: Conversa não encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                erro: "conversa não encontrada"
+
+  /metricas:
+    get:
+      tags:
+        - Métricas
+      summary: Obter métricas do sistema e comparativo de modelos
+      description: |
+        Retorna a distribuição de sentimentos preditos em tempo real no banco e o comparativo estatístico
+        offline dos modelos (F1-Score Macro, Matriz de Confusão e Teste de McNemar).
+      operationId: obterMetricas
+      responses:
+        '200':
+          description: Métricas do sistema consolidadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricasResponse'
+              example:
+                distribuicao:
+                  positivo: 1250
+                  negativo: 820
+                  neutro: 430
+                total_conversas: 1200
+                modelos:
+                  n_teste: 12615
+                  modelos:
+                    - nome: "lexico"
+                      f1_macro: 0.4885
+                      matriz: [[3303, 114, 1272], [414, 1626, 2745], [1430, 345, 1366]]
+                    - nome: "classico"
+                      f1_macro: 0.7346
+                      matriz: [[3645, 163, 881], [87, 4097, 601], [674, 673, 1794]]
+                    - nome: "bertimbau"
+                      f1_macro: 0.7640
+                      matriz: [[3800, 120, 773], [60, 4200, 525], [510, 550, 2077]]
+
+  /openapi.yaml:
+    get:
+      tags:
+        - Documentação
+      summary: Baixar especificação OpenAPI
+      description: Retorna o documento estático OpenAPI 3.1 no formato YAML.
+      operationId: obterOpenApiYaml
+      responses:
+        '200':
+          description: Arquivo YAML da especificação
+          content:
+            text/yaml:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      tags:
+        - Documentação
+      summary: Interface interativa da API (Scalar)
+      description: Renderiza a documentação moderna e interativa do Scalar apontando para a especificação OpenAPI.
+      operationId: renderizarScalarDocs
+      responses:
+        '200':
+          description: Página HTML interativa do Scalar
+          content:
+            text/html:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Insira o token JWT no formato: Bearer <access_token>"
+
+  schemas:
+    CreateUserRequest:
+      type: object
+      required:
+        - name
+        - email
+        - password
+      properties:
+        name:
+          type: string
+          description: Nome completo do usuário
+          example: "Administrador do Sistema"
+        email:
+          type: string
+          format: email
+          description: Endereço de e-mail único
+          example: "admin@empresa.com"
+        password:
+          type: string
+          minLength: 6
+          description: Senha com no mínimo 6 caracteres
+          example: "senhaForte123"
+
+    UserOutput:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [USER, ADMIN]
+        created_at:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "admin@empresa.com"
+        password:
+          type: string
+          example: "senhaForte123"
+
+    LoginOutput:
+      type: object
+      properties:
+        email:
+          type: string
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          description: Token de renovação JWT emitido no login ou na última renovação
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+    RefreshTokenOutput:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: Novo token de acesso com 1 hora de validade
+        refresh_token:
+          type: string
+          description: Novo token de renovação com 7 dias de validade (rotação de tokens)
+
+    UploadOutput:
+      type: object
+      properties:
+        fonte:
+          type: string
+        conversas:
+          type: integer
+        mensagens:
+          type: integer
+        status:
+          type: string
+          example: "importado"
+
+    AnalisarConversasRequest:
+      type: object
+      properties:
+        fonte:
+          type: string
+          description: Nome da fonte/base a ser analisada
+          example: "piloto"
+        conversa_ids:
+          type: array
+          items:
+            type: integer
+          description: Lista de IDs das conversas
+          example: [1, 2]
+        modelo:
+          type: string
+          enum: [lexico, classico, bertimbau]
+          default: lexico
+          description: "Modelo preditivo: lexico, classico (TF-IDF) ou bertimbau"
+        apenas_nao_classificadas:
+          type: boolean
+          default: true
+          description: "Se true, analisa apenas mensagens sem rotulo_pred"
+
+    AnalisarConversasOutput:
+      type: object
+      properties:
+        fonte:
+          type: string
+          nullable: true
+        total_conversas:
+          type: integer
+        mensagens_classificadas:
+          type: integer
+        modelo_utilizado:
+          type: string
+
+    IndicadoresSessao:
+      type: object
+      nullable: true
+      properties:
+        abertura:
+          type: string
+          enum: [positivo, negativo, neutro]
+        encerramento:
+          type: string
+          enum: [positivo, negativo, neutro]
+        delta:
+          type: integer
+          description: "Pontuação do final menos o início (-2 a +2)"
+        trocas_de_polaridade:
+          type: integer
+        pior_momento:
+          type: integer
+        n_mensagens:
+          type: integer
+
+    ConversaListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        origem_id:
+          type: string
+        fonte:
+          type: string
+        indicadores:
+          $ref: '#/components/schemas/IndicadoresSessao'
+
+    ConversasResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        conversas:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversaListItem'
+
+    MensagemItem:
+      type: object
+      properties:
+        ordem:
+          type: integer
+        autor:
+          type: string
+          enum: [usuario, atendente, sistema]
+        texto:
+          type: string
+        rotulo:
+          type: string
+          enum: [positivo, negativo, neutro]
+          nullable: true
+        score:
+          type: number
+          format: float
+          nullable: true
+        rotulo_real:
+          type: string
+          enum: [positivo, negativo, neutro]
+          nullable: true
+
+    ConversaDetalheResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        origem_id:
+          type: string
+        fonte:
+          type: string
+        indicadores:
+          $ref: '#/components/schemas/IndicadoresSessao'
+        mensagens:
+          type: array
+          items:
+            $ref: '#/components/schemas/MensagemItem'
+
+    MetricasResponse:
+      type: object
+      properties:
+        distribuicao:
+          type: object
+          additionalProperties:
+            type: integer
+        total_conversas:
+          type: integer
+        modelos:
+          type: object
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        erro:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        detalhes:
+          type: array
+          items:
+            type: string
+          description: Detalhes de validação de importação

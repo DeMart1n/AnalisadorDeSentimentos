@@ -1,17 +1,110 @@
 # API
 
-JSON puro sobre Django views. Sem DRF, sem autenticação, sem paginação por cursor — app local
-single-user. Base: `http://localhost:8000/api`.
+JSON puro sobre Django views. Sem DRF, autenticação stateless via JWT (`PyJWT`), sem paginação por cursor. Base: `http://localhost:8000/api`.
+A documentação interativa moderna via **Scalar (OpenAPI 3.1)** está disponível em `http://localhost:8000/api/docs` (e a especificação em `http://localhost:8000/api/openapi.yaml`).
 
-Todas as respostas de erro têm a forma `{"erro": "...", "detalhes": [...]}`, com `detalhes`
-apenas quando há uma lista de problemas (validação de arquivo).
+Todas as respostas de erro têm a forma `{"erro": "..."}` (ou com `"detalhes": [...]` quando há lista de validações de arquivo).
+
+Para endpoints protegidos com `@jwt_required`, envie o cabeçalho:
+`Authorization: Bearer <access_token>`
+
+---
+
+## `POST /api/register`
+
+Cria um novo usuário na aplicação com role padrão `USER`. A senha é armazenada com hash seguro (`make_password`). `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+| Campo | Obrigatório | Tipo | Descrição |
+|---|---|---|---|
+| `name` | sim | string | Nome do usuário |
+| `email` | sim | string | E-mail válido e único |
+| `password` | sim | string | Senha com no mínimo 6 caracteres |
+
+### Payload de exemplo
+
+```json
+{
+  "name": "Luiz Felipe",
+  "email": "luiz@email.com",
+  "password": "luiz1234"
+}
+```
+
+### Resposta
+
+| Status | Quando | Formato |
+|---|---|---|
+| 201 | Usuário criado com sucesso | `{"name": "...", "email": "...", "role": "USER", "created_at": "..."}` |
+| 400 | Payload malformado ou campos inválidos/faltando | `{"erro": ["O campo 'name' é obrigatório."]}` ou `{"erro": "JSON inválido: ..."}` |
+
+---
+
+## `POST /api/login`
+
+Autentica um usuário existente por e-mail e senha, gerando um par de tokens JWT (`access_token` e `refresh_token`). `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+| Campo | Obrigatório | Tipo | Descrição |
+|---|---|---|---|
+| `email` | sim | string | E-mail cadastrado |
+| `password` | sim | string | Senha do usuário |
+
+### Payload de exemplo
+
+```json
+{
+  "email": "luiz@email.com",
+  "password": "luiz1234"
+}
+```
+
+### Resposta
+
+| Status | Quando | Formato |
+|---|---|---|
+| 200 | Credenciais válidas | `{"email": "...", "access_token": "eyJhbGci...", "refresh_token": "eyJhbGci..."}` |
+| 401 | Credenciais inválidas | `{"erro": "E-mail ou senha inválidos."}` |
+| 400 | Payload malformado ou campos faltando | `{"erro": [...]}` ou `{"erro": "JSON inválido: ..."}` |
+
+- **Access Token:** Validade de 1 hora (`type: "access"`).
+- **Refresh Token:** Validade de 7 dias (`type: "refresh"`).
+
+---
+
+## `POST /api/refresh`
+
+Renova o par de tokens JWT sem necessidade de informar credenciais novamente (Refresh Token Rotation). `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+| Campo | Obrigatório | Tipo | Descrição |
+|---|---|---|---|
+| `refresh_token` | sim | string | Token de renovação emitido no login ou último refresh |
+
+### Payload de exemplo
+
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Resposta
+
+| Status | Quando | Formato |
+|---|---|---|
+| 200 | Token válido e renovado com sucesso | `{"access_token": "eyJhbGci...", "refresh_token": "eyJhbGci..."}` |
+| 401 | Token expirado, com assinatura inválida ou de tipo incorreto | `{"erro": "Refresh token expirado."}` |
+| 404 | Usuário do token não encontrado no banco | `{"erro": "Usuário não encontrado."}` |
+| 400 | Payload malformado ou sem campo `refresh_token` | `{"erro": [...]}` ou `{"erro": "JSON inválido: ..."}` |
 
 ---
 
 ## `POST /api/upload`
 
-Recebe um arquivo, importa, classifica as mensagens de usuário e devolve o resumo.
-`multipart/form-data`. **CSRF desativado** (`@csrf_exempt`) — ver ARQUITETURA.md.
+Recebe um arquivo, valida o esquema e grava as conversas e mensagens no banco de dados de forma rápida e segura.
+`multipart/form-data`. **CSRF desativado** (`@csrf_exempt`).
+
+> 🔒 **Autenticação & Permissão:** Rota protegida via JWT (`@admin_required`). Requer cabeçalho `Authorization: Bearer <access_token>` com role **`ADMIN`**. Usuários com role `USER` recebem `403 Forbidden`.
+
+A classificação por IA foi desacoplada deste endpoint para garantir resposta quase instantânea (~50ms) e evitar timeouts de rede. Para classificar as mensagens importadas, chame o endpoint `POST /api/conversas/analisar`.
 
 | Campo | Obrigatório | Descrição |
 |---|---|---|
@@ -40,29 +133,70 @@ c2,1,usuario,obrigado resolveu,,positivo
 
 ### Comportamento
 
-- **Ou entra tudo, ou nada.** A importação é uma transação: qualquer erro de esquema aborta o
-  arquivo inteiro. Um CSV meio importado é pior que um erro.
+- **Ou entra tudo, ou nada.** A importação é uma transação atômica: qualquer erro de esquema aborta o
+  arquivo inteiro.
 - **Reimportar substitui.** Mesma `(fonte, conversa_id)` → as mensagens antigas são apagadas e
-  regravadas. Corrigir e reenviar não duplica.
-- **Só mensagens de `usuario` são classificadas.** As de `sistema` e `atendente` são gravadas
-  com `rotulo_pred = null`.
-- **A classificação é síncrona**, dentro da request, e reclassifica todas as conversas da
-  `fonte` — não apenas as do arquivo enviado.
+  regravadas sem duplicar.
+- **As mensagens são salvas inicialmente com `rotulo_pred = null`**, aguardando análise pelo endpoint de classificação.
 
 ### Resposta
 
 ```json
-{"fonte": "piloto", "conversas": 2, "mensagens": 3, "mensagens_classificadas": 2}
+{"fonte": "piloto", "conversas": 2, "mensagens": 3, "status": "importado"}
 ```
 
 | Status | Quando |
 |---|---|
-| 200 | importado e classificado |
-| 400 | sem campo `arquivo`; arquivo não é UTF-8; JSON malformado; erro de esquema (com `detalhes`, até 20 mensagens) |
+| 201 | Arquivo validado e conversas importadas com sucesso |
+| 400 | Sem campo `arquivo`; arquivo não é UTF-8; JSON malformado; erro de esquema (com `detalhes`, até 20 mensagens) |
+| 401 | Token JWT ausente, expirado ou inválido |
+| 403 | Usuário autenticado, mas não possui a role `ADMIN` |
 
 ```json
-{"erro": "arquivo inválido", "detalhes": ["linha 4: autor inválido 'robo'", "linha 7: ordem não é inteiro: 'x'"]}
+{"erro": "Acesso negado: privilégios de administrador necessários."}
 ```
+
+---
+
+## `POST /api/conversas/analisar`
+
+Dispara a inferência da IA para classificar o sentimento das mensagens de usuário (`positivo | negativo | neutro`) das conversas previamente importadas. `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+> 🔒 **Autenticação:** Rota protegida via JWT (`@jwt_required`). Requer cabeçalho `Authorization: Bearer <access_token>` de qualquer usuário autenticado (`ADMIN` ou `USER`).
+
+| Campo | Obrigatório | Tipo | Padrão | Descrição |
+|---|---|---|---|---|
+| `fonte` | condicional | string | `null` | Identificador da base a ser analisada (obrigatório se não informar `conversa_ids`) |
+| `conversa_ids` | condicional | array[int] | `null` | Lista específica de IDs das conversas (obrigatório se não informar `fonte`) |
+| `modelo` | não | string | `"lexico"` | Modelo a utilizar: `"lexico"`, `"classico"` ou `"bertimbau"` |
+| `apenas_nao_classificadas` | não | boolean | `true` | Se `true`, classifica apenas mensagens pendentes (`rotulo_pred is null`). Se `false`, reclassifica tudo |
+
+### Payload de exemplo
+
+```json
+{
+  "fonte": "piloto",
+  "modelo": "lexico",
+  "apenas_nao_classificadas": true
+}
+```
+
+### Resposta
+
+```json
+{
+  "fonte": "piloto",
+  "total_conversas": 2,
+  "mensagens_classificadas": 2,
+  "modelo_utilizado": "lexico"
+}
+```
+
+| Status | Quando |
+|---|---|
+| 200 | Mensagens analisadas e classificadas com sucesso |
+| 400 | Payload malformado, modelo inválido ou ausência de `fonte`/`conversa_ids` |
+| 404 | Nenhuma conversa encontrada para a fonte ou IDs informados |
 
 ---
 
@@ -169,10 +303,23 @@ O `metricas.json` em disco hoje contém apenas **léxico e clássico** — a úl
 
 ---
 
+## `GET /api/openapi.yaml`
+
+Retorna a especificação estática da API no padrão **OpenAPI 3.1** em formato YAML, contendo todos os esquemas de dados, exemplos, códigos de retorno e autenticação.
+
+---
+
+## `GET /api/docs`
+
+Interface web moderna e interativa gerada pelo **Scalar** (`@scalar/api-reference`), com cliente HTTP integrado para testes, suporte a temas (dark mode) e documentação de todos os endpoints.
+
+---
+
 ## Notas de implementação
 
 - **Sem paginação real.** `limite` corta em 500; se a lista de conversas crescer a ponto de
   incomodar, aí entra cursor.
 - **`GET /api/conversas` faz `prefetch_related`** e calcula indicadores em Python. Com milhares
   de conversas por página isso pesa — materializar os indicadores é a saída, e só quando doer.
-- **Nenhuma rota escreve exceto `/upload`.**
+- **Rotas de escrita:** `/upload` (multipart), `/register` (JSON) e `/login` (JSON).
+- **Autenticação Stateless:** JWT (`PyJWT`) com `access_token` (1h) e `refresh_token` (7d). Proteção de rotas com `@jwt_required` checando o cabeçalho `Authorization: Bearer <token>`.

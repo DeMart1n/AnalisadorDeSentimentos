@@ -2,20 +2,97 @@ import json
 from pathlib import Path
 
 from django.db.models import Count
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .classificador import classificar_conversas
 from .importacao import ErroDeImportacao, importar
 from .indicadores import indicadores
-from .models import USUARIO, Conversa, Mensagem
+from .models import USUARIO, Conversa, Mensagem, Users
+from .dtos.user.create_user_dto import CreateUserDTO, UserOutputDTO
+from .dtos.user.login_dto import LoginUserDTO, LoginOutputDTO
+from .dtos.user.refresh_token_dto import RefreshTokenDTO, RefreshTokenOutputDTO
+from .dtos.analise_dto import AnalisarConversasDTO, AnalisarConversasOutputDTO
+from django.contrib.auth.hashers import make_password, check_password
+from .auth import token_generator, decode_refresh_token, jwt_required, admin_required
 
 METRICAS = Path(__file__).resolve().parents[1] / "models" / "metricas.json"
+OPENAPI_PATH = Path(__file__).resolve().parents[1] / "docs" / "openapi.yaml"
+
+@csrf_exempt
+@require_POST
+def create(request):
+    try:
+        if not request.body:
+            return JsonResponse({"erro": "Corpo da requisição vazio."}, status=400)
+        data = json.loads(request.body)
+        dto = CreateUserDTO.from_dict(data)
+        user = Users.objects.create(
+            name=dto.name,
+            email=dto.email,
+            password=make_password(dto.password),
+            role=dto.role,
+        )
+        return JsonResponse(UserOutputDTO.from_model(user).to_dict(), status=201)
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+
+@csrf_exempt
+@require_POST
+def login(request):
+    try:
+        if not request.body:
+            return JsonResponse({"erro": "Corpo da requisição vazio."}, status=400)
+        data = json.loads(request.body)
+        dto = LoginUserDTO.from_dict(data)
+        user = Users.objects.filter(email=dto.email).first()
+        if not user or not check_password(dto.password, user.password):
+            return JsonResponse({"erro": "E-mail ou senha inválidos."}, status=401)
+        access_token, refresh_token = token_generator(user)
+        return JsonResponse(
+            LoginOutputDTO.from_user(user, access_token, refresh_token).to_dict(),
+            status=200
+        )
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+
+@csrf_exempt
+@require_POST
+def refresh(request):
+    try:
+        if not request.body:
+            return JsonResponse({"erro": "Corpo da requisição vazio."}, status=400)
+        data = json.loads(request.body)
+        dto = RefreshTokenDTO.from_dict(data)
+
+        payload, erro = decode_refresh_token(dto.refresh_token)
+        if erro:
+            return JsonResponse({"erro": erro}, status=401)
+
+        user = Users.objects.filter(id=payload.get("user_id")).first()
+        if not user:
+            return JsonResponse({"erro": "Usuário não encontrado."}, status=404)
+
+        access_token, new_refresh_token = token_generator(user)
+        output = RefreshTokenOutputDTO(
+            access_token=access_token,
+            refresh_token=new_refresh_token,
+        )
+        return JsonResponse(output.to_dict(), status=200)
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
 
 
 @csrf_exempt  # ponytail: app local sem autenticação nem sessão. Reativar CSRF quando entrar auth ou dado real de empresa.
 @require_POST
+@admin_required
 def upload(request):
     arquivo = request.FILES.get("arquivo")
     if not arquivo:
@@ -34,14 +111,52 @@ def upload(request):
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
 
-    ids = list(Conversa.objects.filter(fonte=fonte).values_list("id", flat=True))
-    classificadas = classificar_conversas(ids)
     return JsonResponse({
         "fonte": fonte,
         "conversas": n_conversas,
         "mensagens": n_mensagens,
-        "mensagens_classificadas": classificadas,
-    })
+        "status": "importado",
+    }, status=201)
+
+
+@csrf_exempt
+@require_POST
+@jwt_required
+def analisar(request):
+    try:
+        if not request.body:
+            return JsonResponse({"erro": "Corpo da requisição vazio. Envie um JSON com 'fonte' ou 'conversa_ids'."}, status=400)
+        data = json.loads(request.body)
+        dto = AnalisarConversasDTO.from_dict(data)
+
+        qs = Conversa.objects.all()
+        if dto.fonte:
+            qs = qs.filter(fonte=dto.fonte)
+        if dto.conversa_ids:
+            qs = qs.filter(id__in=dto.conversa_ids)
+
+        ids = list(qs.values_list("id", flat=True))
+        if not ids:
+            return JsonResponse({"erro": "Nenhuma conversa encontrada para os critérios informados."}, status=404)
+
+        classificadas = classificar_conversas(
+            ids=ids,
+            nome=dto.modelo,
+            apenas_nao_classificadas=dto.apenas_nao_classificadas,
+        )
+
+        output = AnalisarConversasOutputDTO(
+            fonte=dto.fonte,
+            total_conversas=len(ids),
+            mensagens_classificadas=classificadas,
+            modelo_utilizado=dto.modelo,
+        )
+        return JsonResponse(output.to_dict(), status=200)
+
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
+    except json.JSONDecodeError as e:
+        return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
 
 
 @require_GET
@@ -97,3 +212,53 @@ def metricas(request):
         "total_conversas": Conversa.objects.count(),
         "modelos": modelos,
     })
+
+
+# DOCUMENTACAO
+def _obter_openapi_conteudo():
+    if OPENAPI_PATH.exists():
+        return OPENAPI_PATH.read_text(encoding="utf-8")
+    fallback = Path("/app/docs/openapi.yaml")
+    if fallback.exists():
+        return fallback.read_text(encoding="utf-8")
+    return None
+
+@require_GET
+def openapi_spec(request):
+    conteudo = _obter_openapi_conteudo()
+    if not conteudo:
+        return JsonResponse({"erro": "Arquivo de especificação OpenAPI não encontrado."}, status=404)
+    return HttpResponse(
+        conteudo,
+        content_type="text/yaml; charset=utf-8",
+    )
+
+@require_GET
+def docs(request):
+    html = """<!doctype html>
+<html>
+  <head>
+    <title>API Reference — Analisador de Sentimentos</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script>
+      Scalar.createApiReference('#app', {
+        url: '/api/openapi.yaml',
+        theme: 'purple',
+        layout: 'modern',
+        darkMode: true
+      })
+    </script>
+  </body>
+</html>"""
+    return HttpResponse(html, content_type="text/html; charset=utf-8")

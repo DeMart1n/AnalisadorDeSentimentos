@@ -40,3 +40,26 @@ class Mensagem(models.Model):
 
     def __str__(self):
         return f"{self.conversa_id}#{self.ordem} {self.autor}"
+
+# Users model
+ROLE_ADMIN = "ADMIN"
+ROLE_USER = "USER"
+ROLE_CHOICES = [
+    (ROLE_ADMIN, "Admin"),
+    (ROLE_USER, "User"),
+]
+
+class Users(models.Model):
+    name = models.CharField(max_length=255)
+    email = models.EmailField(max_length=254, unique=True, db_index=True)
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default=ROLE_USER)
+    password = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "users"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.email}) - {self.role}"

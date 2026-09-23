@@ -17,9 +17,12 @@ def modelo(nome=PADRAO):
     return carregar(nome)
 
 
-def classificar_conversas(ids, nome=PADRAO):
+def classificar_conversas(ids, nome=PADRAO, apenas_nao_classificadas=False):
     """Classifica as mensagens do USUÁRIO das conversas dadas. Devolve quantas foram."""
-    mensagens = list(Mensagem.objects.filter(conversa_id__in=ids, autor=USUARIO))
+    qs = Mensagem.objects.filter(conversa_id__in=ids, autor=USUARIO)
+    if apenas_nao_classificadas:
+        qs = qs.filter(rotulo_pred__isnull=True)
+    mensagens = list(qs)
     if not mensagens:
         return 0
     rotulos, scores = modelo(nome).prever([m.texto for m in mensagens])
