@@ -41,6 +41,49 @@ class ImportacaoTest(TestCase):
         dados = '[{"conversa_id":"c9","ordem":1,"autor":"usuario","texto":"oi"}]'
         self.assertEqual(importar(dados, fonte="teste", formato="json"), (1, 1))
 
+    def test_delimitador_ponto_e_virgula(self):
+        csv_ponto_virgula = (
+            "conversa_id;ordem;autor;texto\n"
+            "c10;1;usuario;tudo bem\n"
+            "c10;2;atendente;ola como posso ajudar\n"
+        )
+        conversas, mensagens = importar(csv_ponto_virgula, fonte="teste_pv")
+        self.assertEqual((conversas, mensagens), (1, 2))
+        self.assertEqual(Mensagem.objects.filter(conversa__origem_id="c10").count(), 2)
+
+    def test_arquivo_com_utf8_bom(self):
+        csv_bom = "\ufeffconversa_id,ordem,autor,texto\nc11,1,usuario,ola com bom\n"
+        conversas, mensagens = importar(csv_bom, fonte="teste_bom")
+        self.assertEqual((conversas, mensagens), (1, 1))
+        self.assertTrue(Conversa.objects.filter(origem_id="c11").exists())
+
+    def test_aliases_colunas_e_papeis_corporativo(self):
+        # CSV com aliases: conversa, seq, origem, autor, mensagem, contato, telefone
+        csv_corp = (
+            "conversa,seq,origem,autor,mensagem,contato,telefone\n"
+            "chat_100,1,cliente,Mariana Souza,Gostaria de saber meu saldo,Mariana Souza,11999998888\n"
+            "chat_100,2,atendimento,Carlos Agente,Ola Mariana o seu saldo e 100 reais,Mariana Souza,11999998888\n"
+            "chat_100,3,sistema,URA Bot,Protocolo finalizado,Mariana Souza,11999998888\n"
+        )
+        conversas, mensagens = importar(csv_corp, fonte="blip_corp")
+        self.assertEqual((conversas, mensagens), (1, 3))
+        msgs = list(Conversa.objects.get(origem_id="chat_100").mensagens.values_list("ordem", "autor", "texto"))
+        self.assertEqual(msgs[0], (1, "usuario", "Gostaria de saber meu saldo"))
+        self.assertEqual(msgs[1], (2, "atendente", "Ola Mariana o seu saldo e 100 reais"))
+        self.assertEqual(msgs[2], (3, "sistema", "Protocolo finalizado"))
+
+    def test_fallback_ordenacao_sem_coluna_ordem(self):
+        # Sem coluna de ordem/seq: ordenação automática pela linha ou timestamp
+        csv_sem_ordem = (
+            "ticket_id,sender,body,data_hora\n"
+            "tk_1,user,segunda msg,2026-03-01T10:05:00\n"
+            "tk_1,user,primeira msg,2026-03-01T10:00:00\n"
+        )
+        conversas, mensagens = importar(csv_sem_ordem, fonte="zendesk")
+        self.assertEqual((conversas, mensagens), (1, 2))
+        msgs = list(Conversa.objects.get(origem_id="tk_1").mensagens.order_by("ordem").values_list("ordem", "texto"))
+        self.assertEqual(msgs, [(1, "primeira msg"), (2, "segunda msg")])
+
 
 from .avaliacao import avaliar, dividir_por_conversa, mcnemar
 from .modelos import carregar
