@@ -41,6 +41,199 @@ class ImportacaoTest(TestCase):
         dados = '[{"conversa_id":"c9","ordem":1,"autor":"usuario","texto":"oi"}]'
         self.assertEqual(importar(dados, fonte="teste", formato="json"), (1, 1))
 
+    def test_delimitador_ponto_e_virgula(self):
+        csv_ponto_virgula = (
+            "conversa_id;ordem;autor;texto\n"
+            "c10;1;usuario;tudo bem\n"
+            "c10;2;atendente;ola como posso ajudar\n"
+        )
+        conversas, mensagens = importar(csv_ponto_virgula, fonte="teste_pv")
+        self.assertEqual((conversas, mensagens), (1, 2))
+        self.assertEqual(Mensagem.objects.filter(conversa__origem_id="c10").count(), 2)
+
+    def test_arquivo_com_utf8_bom(self):
+        csv_bom = "\ufeffconversa_id,ordem,autor,texto\nc11,1,usuario,ola com bom\n"
+        conversas, mensagens = importar(csv_bom, fonte="teste_bom")
+        self.assertEqual((conversas, mensagens), (1, 1))
+        self.assertTrue(Conversa.objects.filter(origem_id="c11").exists())
+
+    def test_aliases_colunas_e_papeis_corporativo(self):
+        # CSV com aliases: conversa, seq, origem, autor, mensagem, contato, telefone
+        csv_corp = (
+            "conversa,seq,origem,autor,mensagem,contato,telefone\n"
+            "chat_100,1,cliente,Mariana Souza,Gostaria de saber meu saldo,Mariana Souza,11999998888\n"
+            "chat_100,2,atendimento,Carlos Agente,Ola Mariana o seu saldo e 100 reais,Mariana Souza,11999998888\n"
+            "chat_100,3,sistema,URA Bot,Protocolo finalizado,Mariana Souza,11999998888\n"
+        )
+        conversas, mensagens = importar(csv_corp, fonte="blip_corp")
+        self.assertEqual((conversas, mensagens), (1, 3))
+        msgs = list(Conversa.objects.get(origem_id="chat_100").mensagens.values_list("ordem", "autor", "texto"))
+        self.assertEqual(msgs[0], (1, "usuario", "Gostaria de saber meu saldo"))
+        self.assertEqual(msgs[1], (2, "atendente", "Ola [NOME] o seu saldo e 100 reais"))
+        self.assertEqual(msgs[2], (3, "sistema", "Protocolo finalizado"))
+
+    def test_fallback_ordenacao_sem_coluna_ordem(self):
+        # Sem coluna de ordem/seq: ordenação automática pela linha ou timestamp
+        csv_sem_ordem = (
+            "ticket_id,sender,body,data_hora\n"
+            "tk_1,user,segunda msg,2026-03-01T10:05:00\n"
+            "tk_1,user,primeira msg,2026-03-01T10:00:00\n"
+        )
+        conversas, mensagens = importar(csv_sem_ordem, fonte="zendesk")
+        self.assertEqual((conversas, mensagens), (1, 2))
+        msgs = list(Conversa.objects.get(origem_id="tk_1").mensagens.order_by("ordem").values_list("ordem", "texto"))
+        self.assertEqual(msgs, [(1, "primeira msg"), (2, "segunda msg")])
+
+    def test_importacao_persiste_dados_anonimizados(self):
+        csv_sensivel = (
+            "conversa,origem,autor,contato,telefone,mensagem\n"
+            "c_lgpd,cliente,Lucas Mendes Cod 1234,Lucas Mendes,11988887777,Ola sou o Lucas meu cpf e 111.444.777-35 e email lucas@empresa.com\n"
+            "c_lgpd,atendimento,Mariana Suporte,Lucas Mendes,11988887777,Ola Lucas ligaremos no 11988887777\n"
+        )
+        conversas, mensagens = importar(csv_sensivel, fonte="lgpd_teste")
+        self.assertEqual((conversas, mensagens), (1, 2))
+
+        conversa = Conversa.objects.get(origem_id="c_lgpd")
+        msg1 = conversa.mensagens.get(ordem=1)
+        msg2 = conversa.mensagens.get(ordem=2)
+
+        # Dados sensíveis não devem existir em texto puro no banco de dados
+        self.assertNotIn("111.444.777-35", msg1.texto)
+        self.assertNotIn("lucas@empresa.com", msg1.texto)
+        self.assertNotIn("Lucas", msg1.texto)
+        self.assertNotIn("11988887777", msg2.texto)
+
+        self.assertIn("[CPF]", msg1.texto)
+        self.assertIn("[EMAIL]", msg1.texto)
+        self.assertIn("[NOME]", msg1.texto)
+        self.assertIn("[TELEFONE]", msg2.texto)
+
+
+from .anonimizador import (
+    anonimizar_cartao,
+    anonimizar_cnpj,
+    anonimizar_cpf,
+    anonimizar_email,
+    anonimizar_nomes,
+    anonimizar_telefone,
+    anonimizar_texto,
+    extrair_nomes_do_dialogo,
+    validar_cpf_checksum,
+)
+
+
+class AnonimizadorTest(TestCase):
+    def test_anonimizar_email(self):
+        texto = "contato via user.teste@provedor.com.br ou admin@empresa.org"
+        self.assertEqual(anonimizar_email(texto), "contato via [EMAIL] ou [EMAIL]")
+
+    def test_anonimizar_cpf_formatado_e_nao_formatado(self):
+        # CPF formatado e numérico com checksum válido (111.444.777-35)
+        texto = "CPF formatado 111.444.777-35 e sem mascara 11144477735"
+        self.assertEqual(anonimizar_cpf(texto), "CPF formatado [CPF] e sem mascara [CPF]")
+
+    def test_nao_anonimiza_numero_de_pedido_como_cpf(self):
+        # 11 dígitos que NÃO possuem checksum de CPF não devem ser mascarados como CPF
+        pedido = "meu pedido e 10023456789"
+        self.assertFalse(validar_cpf_checksum("10023456789"))
+        self.assertEqual(anonimizar_cpf(pedido), "meu pedido e 10023456789")
+
+    def test_anonimizar_cnpj_formatado_e_numerico(self):
+        texto = "CNPJ 11.222.333/0001-81 ou 11222333000181 da filial"
+        self.assertEqual(anonimizar_cnpj(texto), "CNPJ [CNPJ] ou [CNPJ] da filial")
+
+    def test_anonimizar_cartao_credito_com_luhn(self):
+        # Cartão de 16 dígitos com Luhn válido
+        texto = "paguei com o cartao 4532 0151 1283 0366 confirmado"
+        self.assertEqual(anonimizar_cartao(texto), "paguei com o cartao [CARTAO] confirmado")
+
+    def test_anonimizar_telefones_diversos(self):
+        casos = [
+            ("meu tel e (11) 98765-4321", "meu tel e [TELEFONE]"),
+            ("ligue para 11987654321 urgente", "ligue para [TELEFONE] urgente"),
+            ("fixo de sp (11) 3214-5678", "fixo de sp [TELEFONE]"),
+            ("com ddi +55 11 98765-4321", "com ddi [TELEFONE]"),
+        ]
+        for entrada, esperado in casos:
+            with self.subTest(entrada=entrada):
+                self.assertEqual(anonimizar_telefone(entrada), esperado)
+
+    def test_anonimizar_nomes_sem_falsos_positivos(self):
+        # "Ana" não pode mascarar "semana" ou "banana"
+        nomes = {"Ana", "Lucas Mendes Cod 1234"}
+        texto = "Nesta semana o Lucas Mendes falou com a Ana sobre a banana"
+        resultado = anonimizar_nomes(texto, nomes_conhecidos=nomes)
+        self.assertIn("Nesta semana", resultado)
+        self.assertIn("banana", resultado)
+        self.assertNotIn("Lucas Mendes", resultado)
+        self.assertNotIn("Ana sobre", resultado)
+        self.assertIn("[NOME]", resultado)
+
+    def test_precedencia_pipeline_completo(self):
+        texto = (
+            "Ola me chamo Lucas Mendes meu email e lucas11999998888@gmail.com, "
+            "meu cpf e 111.444.777-35 e telefone (11) 98888-7777"
+        )
+        res = anonimizar_texto(texto, nomes_conhecidos={"Lucas Mendes"})
+        self.assertNotIn("Lucas Mendes", res)
+        self.assertNotIn("lucas11999998888@gmail.com", res)
+        self.assertNotIn("111.444.777-35", res)
+        self.assertNotIn("98888-7777", res)
+        self.assertIn("[EMAIL]", res)
+        self.assertIn("[CPF]", res)
+        self.assertIn("[TELEFONE]", res)
+        self.assertIn("[NOME]", res)
+
+    def test_extrair_nomes_do_dialogo(self):
+        msgs = [
+            {"autor": "usuario", "texto": "oi"},
+            {"autor": "sistema", "texto": "Bem vindo! Informe seu nome por favor:"},
+            {"autor": "usuario", "texto": "vinicius"},
+            {"autor": "sistema", "texto": "Obrigado *vinicius* digite o setor:"},
+            {"autor": "atendente", "texto": "Olá! vinicius Sou João Augusto e vou te acompanhar"},
+        ]
+        nomes = extrair_nomes_do_dialogo(msgs)
+        self.assertIn("vinicius", nomes)
+        self.assertIn("João Augusto", nomes)
+
+    def test_importacao_anonimiza_nomes_organicos_do_dialogo(self):
+        csv_dialogo = (
+            "conversa,ordem,origem,mensagem\n"
+            "chat_vini,1,usuario,oi\n"
+            "chat_vini,2,sistema,Bem vindo! Informe seu nome por favor: 0 para sair\n"
+            "chat_vini,3,usuario,vinicius\n"
+            "chat_vini,4,sistema,Obrigado *vinicius* digite a opcao:\n"
+            "chat_vini,5,atendimento,Ola vinicius Sou Carlos Augusto e vou te acompanhar\n"
+        )
+        importar(csv_dialogo, fonte="teste_vini")
+        conv = Conversa.objects.get(origem_id="chat_vini")
+        msgs = {m.ordem: m.texto for m in conv.mensagens.all()}
+
+        self.assertEqual(msgs[3], "[NOME]")
+        self.assertIn("*[NOME]*", msgs[4])
+        self.assertNotIn("vinicius", msgs[3])
+        self.assertNotIn("vinicius", msgs[4])
+        self.assertNotIn("vinicius", msgs[5])
+        self.assertNotIn("Carlos", msgs[5])
+        self.assertNotIn("Augusto", msgs[5])
+
+    def test_anonimizar_cartao_contato_whatsapp(self):
+        csv_card = (
+            'conversa,ordem,origem,mensagem\n'
+            'chat_card,1,usuario,"**Contact:** *Name:* Flavinha *Number (1):* 11988887777"\n'
+            'chat_card,2,atendimento,"Certo, vou chamar a Flavinha agora"\n'
+        )
+        importar(csv_card, fonte="teste_card")
+        conv = Conversa.objects.get(origem_id="chat_card")
+        msgs = {m.ordem: m.texto for m in conv.mensagens.all()}
+
+        self.assertNotIn("Flavinha", msgs[1])
+        self.assertNotIn("Flavinha", msgs[2])
+        self.assertNotIn("11988887777", msgs[1])
+        self.assertIn("[NOME]", msgs[1])
+        self.assertIn("[TELEFONE]", msgs[1])
+        self.assertIn("[NOME]", msgs[2])
+
 
 from .avaliacao import avaliar, dividir_por_conversa, mcnemar
 from .modelos import carregar
@@ -335,6 +528,14 @@ class ApiTest(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("text/yaml", r.headers.get("Content-Type", ""))
         self.assertIn("openapi: 3.1.0", r.content.decode("utf-8"))
+
+    def test_cors_options_preflight(self):
+        # Testa se a requisição OPTIONS para /api/upload retorna 200 com os cabeçalhos de CORS
+        r = self.client.options("/api/upload")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertIn("POST", r.headers.get("Access-Control-Allow-Methods", ""))
+        self.assertIn("Authorization", r.headers.get("Access-Control-Allow-Headers", ""))
 
     def test_docs(self):
         r = self.client.get("/api/docs")

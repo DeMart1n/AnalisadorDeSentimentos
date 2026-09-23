@@ -2,10 +2,12 @@
 
 JSON puro sobre Django views. Sem DRF, autenticação stateless via JWT (`PyJWT`), sem paginação por cursor. Base: `http://localhost:8000/api`.
 A documentação interativa moderna via **Scalar (OpenAPI 3.1)** está disponível em `http://localhost:8000/api/docs` (e a especificação em `http://localhost:8000/api/openapi.yaml`).
+Suporte nativo a **CORS** com resolução automática de requisições preflight (`OPTIONS`) em todos os endpoints.
 
 Todas as respostas de erro têm a forma `{"erro": "..."}` (ou com `"detalhes": [...]` quando há lista de validações de arquivo).
+A ingestão de conversas conta com **anonimização automática em memória (LGPD / Privacy by Design)** antes de qualquer gravação no banco de dados.
 
-Para endpoints protegidos com `@jwt_required`, envie o cabeçalho:
+Para endpoints protegidos com `@jwt_required` ou `@admin_required`, envie o cabeçalho:
 `Authorization: Bearer <access_token>`
 
 ---
@@ -99,8 +101,8 @@ Renova o par de tokens JWT sem necessidade de informar credenciais novamente (Re
 
 ## `POST /api/upload`
 
-Recebe um arquivo, valida o esquema e grava as conversas e mensagens no banco de dados de forma rápida e segura.
-`multipart/form-data`. **CSRF desativado** (`@csrf_exempt`).
+Recebe um arquivo CSV ou JSON, valida os dados através de um **Schema Adapter Flexível**, aplica **Anonimização de Dados Sensíveis (LGPD / Privacy by Design)** em memória e grava as conversas e mensagens atomicamente no banco de dados.
+`multipart/form-data`. **CSRF desativado** (`@csrf_exempt`). Suporta requisições Preflight `OPTIONS` via CORS.
 
 > 🔒 **Autenticação & Permissão:** Rota protegida via JWT (`@admin_required`). Requer cabeçalho `Authorization: Bearer <access_token>` com role **`ADMIN`**. Usuários com role `USER` recebem `403 Forbidden`.
 
@@ -108,36 +110,64 @@ A classificação por IA foi desacoplada deste endpoint para garantir resposta q
 
 | Campo | Obrigatório | Descrição |
 |---|---|---|
-| `arquivo` | sim | CSV ou JSON em UTF-8. O formato é decidido pela extensão `.json` |
+| `arquivo` | sim | CSV ou JSON em UTF-8 (com ou sem BOM). O formato é decidido pela extensão `.json` |
 | `fonte` | não | Identificador da base. Padrão: nome do arquivo sem extensão |
 
-### Esquema do arquivo
+### Recursos do Importador (Schema Adapter Flexível)
 
-Colunas do CSV / chaves do objeto JSON (o JSON deve ser uma **lista** de objetos):
+O importador adapta exports de diversas plataformas de atendimento (Blip, Zenvia, Salesforce, Zendesk, etc.):
 
-| Campo | Obrigatório | Formato |
-|---|---|---|
-| `conversa_id` | sim | qualquer string |
-| `ordem` | sim | inteiro, único dentro da conversa |
-| `autor` | sim | `usuario` \| `atendente` \| `sistema` |
-| `texto` | sim | |
-| `timestamp` | não | ISO 8601. Sem fuso, é lido em `America/Sao_Paulo` |
-| `rotulo` | não | `positivo` \| `negativo` \| `neutro` — o rótulo de referência |
+1. **Codificação e Delimitadores:**
+   - Suporta arquivos codificados em UTF-8 convencional ou com **BOM (`\ufeff`)**, típico de exportações do Excel no Windows.
+   - Detecta automaticamente se o delimitador do CSV é **vírgula (`,`)** ou **ponto e vírgula (`;`)**.
+2. **Mapeamento Dinâmico de Colunas (Aliases):**
+   - `conversa_id`: `["conversa_id", "conversa", "chat_id", "ticket_id", "protocolo", "id_conversa", "session_id"]`
+   - `ordem`: `["ordem", "seq", "sequencia", "index", "order", "mensagem_id"]` *(opcional; ver fallback abaixo)*
+   - `texto`: `["texto", "mensagem", "text", "msg", "conteudo", "message", "body"]`
+   - `autor`: `["autor", "origem", "remetente", "sender", "from"]`
+   - `origem`: `["origem", "tipo", "role"]`
+   - `timestamp`: `["timestamp", "mensagem_em", "enviada_em", "data_hora", "created_at", "date"]`
+   - `rotulo`: `["rotulo", "sentiment", "sentimento", "label"]`
+   - `contato`: `["contato", "nome_contato", "cliente_nome", "nome", "customer_name", "user_name"]`
+   - `telefone`: `["telefone", "telefone_contato", "celular", "phone", "contact_phone"]`
+3. **Normalização Inteligente de Papéis (Roles):**
+   - `usuario`: `usuario`, `cliente`, `user`, `customer`, `consumidor`, `client`
+   - `atendente`: `atendente`, `agente`, `operador`, `atendimento`, `support`, `analista`, `agent`
+   - `sistema`: `sistema`, `bot`, `ura`, `system`, `ia`, `virtual`, `notificacao`
+   - Resolve automaticamente casos onde a coluna `origem` indica o papel (ex: `"atendimento"`) e `autor` traz o nome do agente (ex: `"Lucas Mendes Cod 1234"`).
+4. **Fallback Automático de Ordenação:**
+   - Se o arquivo não contiver coluna de ordem (`ordem` / `seq`), o sistema ordena automaticamente as mensagens da conversa pelo `timestamp` ou pela ordem física de leitura das linhas.
+
+### Anonimização de Dados Sensíveis (LGPD / Privacy by Design)
+
+Antes de gravar qualquer registro no banco de dados, o texto das mensagens passa por um pipeline estrito e irreversível de anonimização:
+
+- `[EMAIL]`: Endereços de e-mail válidos.
+- `[CARTAO]`: Números de cartão de crédito de 13 a 16 dígitos validados via algoritmo de Luhn.
+- `[CNPJ]`: CNPJs formatados ou sequências numéricas de 14 dígitos com checksum de Módulo 11 válido.
+- `[CPF]`: CPFs formatados ou sequências numéricas de 11 dígitos com checksum de Módulo 11 válido (evita corromper números de pedidos ou protocolos de 11 dígitos).
+- `[TELEFONE]`: Telefones fixos e celulares, formatos com/sem DDD e código de país (+55).
+- `[NOME]`: Nomes próprios de clientes e atendentes identificados via:
+  - Metadados do arquivo (colunas `contato` e `autor`, com limpeza de sufixos como `"Cod 1234"`).
+  - Respostas do usuário a perguntas do bot (ex: *"Informe seu nome por favor:"* ➔ *"vinicius"*).
+  - Ecos de confirmação do bot (ex: *"Obrigado \*vinicius\*"*).
+  - Apresentações explícitas no chat (ex: *"Sou João Augusto"*).
+  - Cartões de contato compartilhados do WhatsApp (ex: `**Contact:** *Name:* Flavinha *Number (1):* ...`).
+
+### Exemplo de CSV Aceito (Corporativo com Aliases)
 
 ```csv
-conversa_id,ordem,autor,texto,timestamp,rotulo
-c1,1,sistema,voce esta na fila,2026-01-02T10:00:00,
-c1,2,usuario,demorou demais,2026-01-02T10:01:00,negativo
-c2,1,usuario,obrigado resolveu,,positivo
+conversa,seq,origem,autor,mensagem,contato,telefone,data_hora
+chat_100,1,cliente,Mariana Souza,Gostaria de saber meu saldo,Mariana Souza,11999998888,2026-03-01T10:00:00
+chat_100,2,atendimento,Carlos Suporte,Ola Mariana seu saldo e de 100 reais,Mariana Souza,11999998888,2026-03-01T10:01:00
+chat_100,3,sistema,URA Bot,Protocolo finalizado: 2026100,Mariana Souza,11999998888,2026-03-01T10:02:00
 ```
 
 ### Comportamento
 
-- **Ou entra tudo, ou nada.** A importação é uma transação atômica: qualquer erro de esquema aborta o
-  arquivo inteiro.
-- **Reimportar substitui.** Mesma `(fonte, conversa_id)` → as mensagens antigas são apagadas e
-  regravadas sem duplicar.
-- **As mensagens são salvas inicialmente com `rotulo_pred = null`**, aguardando análise pelo endpoint de classificação.
+- **Ou entra tudo, ou nada.** A importação é uma transação atômica (`transaction.atomic`): qualquer erro de validação aborta o arquivo inteiro.
+- **Reimportar substitui.** Mesma `(fonte, conversa_id)` → as mensagens antigas são apagadas e regravadas sem duplicidade.
+- **As mensagens são salvas já anonimizadas e inicialmente com `rotulo_pred = null`**, aguardando análise pelo endpoint de classificação.
 
 ### Resposta
 
@@ -147,7 +177,7 @@ c2,1,usuario,obrigado resolveu,,positivo
 
 | Status | Quando |
 |---|---|
-| 201 | Arquivo validado e conversas importadas com sucesso |
+| 201 | Arquivo validado, anonimizado e conversas importadas com sucesso |
 | 400 | Sem campo `arquivo`; arquivo não é UTF-8; JSON malformado; erro de esquema (com `detalhes`, até 20 mensagens) |
 | 401 | Token JWT ausente, expirado ou inválido |
 | 403 | Usuário autenticado, mas não possui a role `ADMIN` |
@@ -321,5 +351,8 @@ Interface web moderna e interativa gerada pelo **Scalar** (`@scalar/api-referenc
   incomodar, aí entra cursor.
 - **`GET /api/conversas` faz `prefetch_related`** e calcula indicadores em Python. Com milhares
   de conversas por página isso pesa — materializar os indicadores é a saída, e só quando doer.
-- **Rotas de escrita:** `/upload` (multipart), `/register` (JSON) e `/login` (JSON).
-- **Autenticação Stateless:** JWT (`PyJWT`) com `access_token` (1h) e `refresh_token` (7d). Proteção de rotas com `@jwt_required` checando o cabeçalho `Authorization: Bearer <token>`.
+- **Rotas de escrita:** `/upload` (multipart), `/register` (JSON), `/login` (JSON), `/refresh` (JSON) e `/conversas/analisar` (JSON).
+- **Autenticação Stateless:** JWT (`PyJWT`) com `access_token` (1h) e `refresh_token` (7d). Proteção de rotas com `@jwt_required` ou `@admin_required` checando o cabeçalho `Authorization: Bearer <token>`.
+- **Suporte a CORS Preflight:** Middleware próprio que responde a requisições `OPTIONS` com status 200 e cabeçalhos permissivos (`Access-Control-Allow-Origin: *`), viabilizando chamadas via Scalar e frontends SPA.
+- **Privacy by Design (LGPD):** O processamento de remoção de dados pessoais sensíveis (`[NOME]`, `[CPF]`, `[CNPJ]`, `[TELEFONE]`, `[EMAIL]`, `[CARTAO]`) é estritamente *in-flight* — dados confidenciais nunca são gravados em disco no SQLite.
+- **Schema Adapter e Resiliência:** Mapeador dinâmico de aliases para cabeçalhos de arquivos, detecção de delimitador (`,` e `;`) e suporte a UTF-8 com ou sem BOM (`\ufeff`).
