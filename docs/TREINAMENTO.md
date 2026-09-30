@@ -70,9 +70,9 @@ Regra da spec, obrigatória para os três degraus:
   muda nada aqui — mas ela precisa estar no código *antes* de entrar conversa real de verdade,
   não depois.
 - **Proporção 20% teste, seed 42.** Determinístico: `random.Random(42).shuffle` sobre a lista
-  ordenada de IDs de conversa.
-- **Mesmo conjunto de teste para todos os modelos.** `treinar_bertimbau` e `avaliar` usam a
-  mesma função `dividir_por_conversa` com a mesma seed, por isso o conjunto de teste do
+  ordenada de IDs de conversa, gerado uma vez e congelado em `models/splits/polaridade.json`.
+- **Mesmo conjunto de teste para todos os modelos.** `treinar_bertimbau` e `avaliar` leem o
+  mesmo arquivo (`split_congelado`), por isso o conjunto de teste do
   BERTimbau nunca entra no treino dele e é idêntico ao dos baselines. Isso é pré-condição do
   McNemar — `mcnemar()` levanta `ValueError` se os `y_true` diferirem.
 
@@ -175,7 +175,7 @@ pesos precisam ser apagados (ou `treinar_bertimbau` reexecutado) ao mudar hiperp
 uv run manage.py treinar_bertimbau --epocas 1 --batch 32
 ```
 
-Flags: `--fonte` limita a uma base, `--seed` deve casar com a de `avaliar`, `--amostra N`
+Flags: `--fonte` limita a uma ou mais bases (`--fonte b2w olist`), `--amostra N`
 limita o treino a N mensagens (útil para teste de fumaça em CPU).
 
 Saída: progresso a cada 100 passos com época, passo/total, perda e minutos decorridos. Ao
