@@ -6,21 +6,24 @@ Regras da spec, valem igualmente para léxico, TF-IDF e BERTimbau:
   - comparação entre modelos por McNemar, não por diferença de número
 """
 
+import json
 import random
+from pathlib import Path
 
 from scipy.stats import binomtest
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
-from .models import ROTULOS, USUARIO, Mensagem
+from .models import ROTULOS, USUARIO, Conversa, Mensagem
 
 CLASSES = [r for r, _ in ROTULOS]
+SPLIT_POLARIDADE = Path(__file__).resolve().parents[1] / "models" / "splits" / "polaridade.json"
 
 
-def carregar_dados(fonte=None):
+def carregar_dados(fontes=None):
     """Mensagens do usuário que têm rótulo real. Devolve [(conversa_id, texto, rotulo)]."""
     qs = Mensagem.objects.filter(autor=USUARIO, rotulo_real__isnull=False)
-    if fonte:
-        qs = qs.filter(conversa__fonte=fonte)
+    if fontes:
+        qs = qs.filter(conversa__fonte__in=fontes)
     return list(qs.values_list("conversa_id", "texto", "rotulo_real"))
 
 
@@ -31,6 +34,27 @@ def dividir_por_conversa(dados, proporcao_teste=0.2, seed=42):
     treino_ids = set(conversas[:corte])
     treino = [d for d in dados if d[0] in treino_ids]
     teste = [d for d in dados if d[0] not in treino_ids]
+    return treino, teste
+
+
+def split_congelado(dados, destino=SPLIT_POLARIDADE):
+    """Treino/teste lidos de um arquivo versionado, gerado uma única vez sobre TODA a base.
+
+    Chave "fonte:origem_id", não o id do banco: sobrevive a reimportação.
+    Conversa que não está no arquivo (rotulada depois) vai para o treino, nunca para o teste.
+    Para regerar, apague o arquivo — e aceite que as métricas antigas deixam de ser comparáveis.
+    """
+    chave = {i: f"{f}:{o}" for i, f, o in Conversa.objects.values_list("id", "fonte", "origem_id")}
+    if not destino.exists():
+        treino, teste = dividir_por_conversa(carregar_dados())
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.write_text(json.dumps({
+            "treino": sorted({chave[d[0]] for d in treino}),
+            "teste": sorted({chave[d[0]] for d in teste}),
+        }, indent=0))
+    teste_ids = set(json.loads(destino.read_text())["teste"])
+    treino = [d for d in dados if chave[d[0]] not in teste_ids]
+    teste = [d for d in dados if chave[d[0]] in teste_ids]
     return treino, teste
 
 

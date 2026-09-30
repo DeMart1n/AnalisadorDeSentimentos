@@ -235,7 +235,7 @@ class AnonimizadorTest(TestCase):
         self.assertIn("[NOME]", msgs[2])
 
 
-from .avaliacao import avaliar, dividir_por_conversa, mcnemar
+from .avaliacao import avaliar, dividir_por_conversa, mcnemar, split_congelado
 from .modelos import carregar
 from .models import NEGATIVO, NEUTRO, POSITIVO
 
@@ -272,6 +272,28 @@ class AvaliacaoTest(TestCase):
         self.assertIn("f1_macro", r)
         self.assertEqual(len(r["matriz"]), 3)
         self.assertEqual(len(r["y_pred"]), len(teste))
+
+    def test_split_congelado_nao_muda_com_conversa_nova(self):
+        import tempfile
+        from pathlib import Path
+
+        from .avaliacao import carregar_dados
+        from .models import USUARIO, Conversa, Mensagem
+
+        def nova(origem):
+            c = Conversa.objects.create(fonte="t", origem_id=origem)
+            Mensagem.objects.create(conversa=c, ordem=0, autor=USUARIO, texto=origem, rotulo_real=POSITIVO)
+
+        for i in range(10):
+            nova(str(i))
+        with tempfile.TemporaryDirectory() as d:
+            arquivo = Path(d) / "split.json"
+            _, teste_antes = split_congelado(carregar_dados(), arquivo)
+            for i in range(10, 30):
+                nova(str(i))
+            treino, teste = split_congelado(carregar_dados(), arquivo)
+        self.assertEqual(teste, teste_antes)
+        self.assertEqual(len(treino) + len(teste), 30)
 
     def test_mcnemar_exige_mesmo_conjunto_de_teste(self):
         a = {"y_true": [POSITIVO], "y_pred": [POSITIVO]}

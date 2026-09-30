@@ -2,7 +2,7 @@ import time
 
 from django.core.management.base import BaseCommand, CommandError
 
-from analise.avaliacao import carregar_dados, dividir_por_conversa
+from analise.avaliacao import carregar_dados, split_congelado
 from analise.modelos.bertimbau import Bertimbau, dispositivo
 
 
@@ -10,8 +10,7 @@ class Command(BaseCommand):
     help = "Faz o fine-tune do BERTimbau no conjunto de TREINO (mesmo split de `avaliar`)"
 
     def add_arguments(self, parser):
-        parser.add_argument("--fonte")
-        parser.add_argument("--seed", type=int, default=42)
+        parser.add_argument("--fonte", nargs="+")
         parser.add_argument("--epocas", type=int, default=2)
         parser.add_argument("--batch", type=int, default=32)
         parser.add_argument("--amostra", type=int, default=0, help="limita o treino a N mensagens (0 = tudo)")
@@ -20,8 +19,8 @@ class Command(BaseCommand):
         dados = carregar_dados(opts["fonte"])
         if not dados:
             raise CommandError("nenhuma mensagem rotulada no banco")
-        # mesma seed de `avaliar`: o conjunto de teste nunca entra no treino
-        treino, teste = dividir_por_conversa(dados, seed=opts["seed"])
+        # mesmo arquivo de `avaliar`: o conjunto de teste nunca entra no treino
+        treino, teste = split_congelado(dados)
         if opts["amostra"]:
             treino = treino[: opts["amostra"]]
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 
-from analise.avaliacao import avaliar, carregar_dados, dividir_por_conversa, mcnemar
+from analise.avaliacao import avaliar, carregar_dados, mcnemar, split_congelado
 from analise.modelos import REGISTRO, carregar
 
 
@@ -12,8 +12,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--modelos", nargs="+", default=list(REGISTRO), choices=list(REGISTRO))
-        parser.add_argument("--fonte", help="limita a uma base específica")
-        parser.add_argument("--seed", type=int, default=42)
+        parser.add_argument("--fonte", nargs="+", help="limita a estas bases (o teste continua o congelado)")
         parser.add_argument("--salvar", action="store_true",
                             help="grava models/metricas.json, consumido por GET /api/metricas")
 
@@ -21,7 +20,7 @@ class Command(BaseCommand):
         dados = carregar_dados(opts["fonte"])
         if not dados:
             raise CommandError("nenhuma mensagem de usuário rotulada no banco — importe uma base antes")
-        treino, teste = dividir_por_conversa(dados, seed=opts["seed"])
+        treino, teste = split_congelado(dados)
         if not teste:
             raise CommandError("conjunto de teste vazio — poucas conversas rotuladas")
 
