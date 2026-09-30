@@ -594,3 +594,22 @@ class RotuloEmocaoTest(TestCase):
         with self.assertRaises(ProtectedError):
             importar(csv_, fonte="chat")
         self.assertTrue(RotuloEmocao.objects.exists())
+
+    def test_importar_brighter_idempotente(self):
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+
+        from .models import RotuloEmocao
+
+        cab = "id,text,anger,disgust,fear,joy,sadness,surprise\n"
+        with tempfile.TemporaryDirectory() as d:
+            for s in ["train", "dev", "test"]:
+                Path(d, f"{s}.csv").write_text(cab + f"ptbr_{s}_track_b_1,adorei esperar 40 min,2,0,0,0,1,0\n")
+            call_command("importar_brighter", dir=Path(d), stdout=open("/dev/null", "w"))
+            call_command("importar_brighter", dir=Path(d), stdout=open("/dev/null", "w"))
+        self.assertEqual(RotuloEmocao.objects.count(), 3)
+        r = RotuloEmocao.objects.first()
+        self.assertEqual(r.emocoes, ["raiva", "tristeza"])
+        self.assertEqual(r.intensidades["raiva"], 2)
