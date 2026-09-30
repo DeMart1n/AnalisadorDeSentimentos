@@ -315,6 +315,19 @@ class EscadaTest(TestCase):
             self.assertTrue(callable(getattr(classe, "prever")))
             self.assertTrue(hasattr(classe, "nome"))
 
+    def test_config_sem_pesos_nao_conta_como_treinado(self):
+        import tempfile
+        from pathlib import Path
+
+        from .modelos.bertimbau import pesos_salvos
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "config.json").write_text("{}")
+            self.assertFalse(pesos_salvos(d))
+            (d / "model.safetensors").write_bytes(b"")
+            self.assertTrue(pesos_salvos(d))
+
 
 from unittest.mock import patch
 
