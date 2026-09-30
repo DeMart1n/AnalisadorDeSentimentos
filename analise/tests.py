@@ -578,3 +578,19 @@ class ApiTest(TestCase):
         self.assertIn("text/html", r.headers.get("Content-Type", ""))
         self.assertIn("@scalar/api-reference", r.content.decode("utf-8"))
         self.assertIn("/api/openapi.yaml", r.content.decode("utf-8"))
+
+
+class RotuloEmocaoTest(TestCase):
+    def test_reimportar_nao_apaga_anotacao_humana(self):
+        from django.db.models import ProtectedError
+
+        from .models import HUMANO, RotuloEmocao
+
+        csv_ = "conversa_id,ordem,autor,texto\nc1,1,usuario,adorei esperar 40 min\n"
+        importar(csv_, fonte="chat")
+        m = Mensagem.objects.get()
+        r = RotuloEmocao.objects.create(mensagem=m, origem=HUMANO, anotador="a1", raiva=True)
+        self.assertEqual(r.emocoes, ["raiva"])
+        with self.assertRaises(ProtectedError):
+            importar(csv_, fonte="chat")
+        self.assertTrue(RotuloEmocao.objects.exists())

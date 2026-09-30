@@ -41,6 +41,45 @@ class Mensagem(models.Model):
     def __str__(self):
         return f"{self.conversa_id}#{self.ordem} {self.autor}"
 
+EMOCOES = ["alegria", "raiva", "tristeza", "medo", "surpresa", "nojo"]  # Ekman; neutro = nenhuma
+HUMANO, LLM, ORIGINAL_DATASET = "humano", "llm", "original_dataset"
+ORIGENS_ROTULO = [(HUMANO, "Humano"), (LLM, "LLM"), (ORIGINAL_DATASET, "Dataset original")]
+
+
+class RotuloEmocao(models.Model):
+    """Rótulo multi-rótulo de emoção de UMA mensagem, separado da polaridade.
+
+    Uma mensagem pode ter vários (dois anotadores, duas passadas de LLM): é daí que sai o Kappa.
+    Fonte, texto, autor e ordem vêm da Mensagem/Conversa; texto já anonimizado na importação.
+    """
+
+    # PROTECT: reimportar conversa apaga as mensagens; anotação humana não pode sumir junto
+    mensagem = models.ForeignKey(Mensagem, on_delete=models.PROTECT, related_name="rotulos_emocao")
+    origem = models.CharField(max_length=20, choices=ORIGENS_ROTULO)
+    anotador = models.CharField(max_length=60, blank=True, help_text="pessoa, ou modelo+prompt da LLM")
+    alegria = models.BooleanField(default=False)
+    raiva = models.BooleanField(default=False)
+    tristeza = models.BooleanField(default=False)
+    medo = models.BooleanField(default=False)
+    surpresa = models.BooleanField(default=False)
+    nojo = models.BooleanField(default=False)
+    intensidades = models.JSONField(null=True, blank=True, help_text='opcional, 0-3: {"raiva": 2}')
+    semente_id = models.CharField(max_length=60, blank=True, help_text="só para dados sintéticos")
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["mensagem", "origem", "anotador"], name="rotulo_emocao_unico")
+        ]
+
+    @property
+    def emocoes(self):
+        return [e for e in EMOCOES if getattr(self, e)]
+
+    def __str__(self):
+        return f"{self.mensagem} {self.origem}:{self.anotador} {self.emocoes or ['neutro']}"
+
+
 # Users model
 ROLE_ADMIN = "ADMIN"
 ROLE_USER = "USER"
