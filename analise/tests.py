@@ -613,3 +613,51 @@ class RotuloEmocaoTest(TestCase):
         r = RotuloEmocao.objects.first()
         self.assertEqual(r.emocoes, ["raiva", "tristeza"])
         self.assertEqual(r.intensidades["raiva"], 2)
+
+    def test_ciclo_de_anotacao(self):
+        import csv
+        import io
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+
+        from .models import RotuloEmocao
+
+        csv_ = ("conversa_id,ordem,autor,texto\n"
+                "c1,1,atendente,posso ajudar?\nc1,2,usuario,adorei esperar 40 min\n"
+                "c1,3,usuario,ok\nc2,1,usuario,qual o prazo?\n")
+        importar(csv_, fonte="chat")
+        with tempfile.TemporaryDirectory() as d:
+            arq = Path(d) / "a.csv"
+            call_command("anotacao", "exportar", str(arq), fontes=["chat"], n=10, stdout=io.StringIO())
+            linhas = list(csv.DictReader(arq.open()))
+            self.assertEqual(len(linhas), 3)  # só cliente
+            primeira = next(l for l in linhas if l["texto"] == "adorei esperar 40 min")
+            self.assertEqual(primeira["anterior"], "posso ajudar?")
+
+            def anotar(nome, marca):
+                for l in linhas:
+                    l.update({"raiva": "1"} if l["texto"] == "adorei esperar 40 min" else {"neutro": marca})
+                with arq.open("w") as f:
+                    w = csv.DictWriter(f, fieldnames=linhas[0].keys())
+                    w.writeheader()
+                    w.writerows(linhas)
+                call_command("anotacao", "importar", str(arq), anotador=nome, stdout=io.StringIO())
+
+            anotar("a", "1")
+            anotar("b", "")  # b deixou as neutras em branco: puladas
+            self.assertEqual(RotuloEmocao.objects.filter(anotador="a").count(), 3)
+            self.assertEqual(RotuloEmocao.objects.filter(anotador="b").count(), 1)
+            out = io.StringIO()
+            call_command("anotacao", "kappa", "a", "b", stdout=out)
+            self.assertIn("1 mensagens em comum", out.getvalue())
+
+            linhas[0].update({"neutro": "1", "raiva": "1"})
+            with arq.open("w") as f:
+                w = csv.DictWriter(f, fieldnames=linhas[0].keys())
+                w.writeheader()
+                w.writerows(linhas)
+            with self.assertRaises(CommandError):
+                call_command("anotacao", "importar", str(arq), anotador="c", stdout=io.StringIO())
