@@ -680,3 +680,37 @@ class RotuloEmocaoTest(TestCase):
         self.assertEqual(r.emocoes, ["raiva", "medo"])
         self.assertEqual(r.mensagem.conversa.origem_id, "dev_e1")
         self.assertTrue(r.mensagem.texto.startswith("[NOME]"))
+
+
+class EmocoesTest(TestCase):
+    def test_limiar_maximiza_f1_por_emocao(self):
+        from .modelos.emocoes import ajustar_limiares
+
+        # emoção 0 separa em 0.3; emoção 1 nunca aparece -> 0.5
+        probs = [[0.9, 0.1], [0.35, 0.2], [0.2, 0.1], [0.1, 0.3]]
+        y = [[1, 0], [1, 0], [0, 0], [0, 0]]
+        self.assertEqual(ajustar_limiares(probs, y), [0.25, 0.5])
+
+    def test_metricas_por_emocao_e_ic(self):
+        from .avaliacao_emocoes import metricas
+
+        y = [[1, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], [0] * 6, [1, 1, 0, 0, 0, 0]]
+        m = metricas(y, y, n_boot=50)
+        self.assertEqual(m["por_emocao"]["alegria"]["f1"], 1.0)
+        self.assertEqual(m["por_emocao"]["alegria"]["suporte"], 2)
+        self.assertEqual(m["neutro_suporte"], 1)
+        lo, hi = m["por_emocao"]["raiva"]["ic95"]
+        self.assertLessEqual(lo, 1.0)
+        self.assertEqual(hi, 1.0)
+
+    def test_split_usa_original_e_recusa_fonte_sem_split(self):
+        from .avaliacao_emocoes import split_emocoes
+
+        dados = [{"fonte": "brighter_ptbr", "origem_id": "ptbr_dev_track_b_00001"},
+                 {"fonte": "goemotions_pt", "origem_id": "test_abc"},
+                 {"fonte": "goemotions_pt", "origem_id": "train_x_y"}]
+        partes = split_emocoes(dados)
+        self.assertEqual({k: len(v) for k, v in partes.items()},
+                         {"validacao": 1, "teste_goemotions_pt": 1, "treino": 1})
+        with self.assertRaises(ValueError):
+            split_emocoes([{"fonte": "chat", "origem_id": "c1"}])

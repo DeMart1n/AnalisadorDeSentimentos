@@ -19,3 +19,5 @@ models/bertimbau/
 .DS_Store
 
 .env
+# Pesos do classificador de emoções — manage.py treinar_emocoes
+models/emocoes/
