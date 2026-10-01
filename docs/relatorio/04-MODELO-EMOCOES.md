@@ -33,7 +33,7 @@ conversa, e isso levaria junto a anotação humana. Com `PROTECT`, a reimportaç
 |---|---|---|
 | BRIGHTER PT-BR | 2.226 treino / 200 dev / 2.226 teste | importado (`importar_brighter`) |
 | Reviews de apps (Zenodo) | 3.011 | rejeitado: texto com stemming, rótulo de emoção derivado da polaridade |
-| GoEmotions-PT | — | pendente: falta decidir o tradutor |
+| GoEmotions-PT | 16.489 treino / 2.048 dev / 2.059 teste (subconjunto) | importado (`importar_goemotions`), traduzido com Claude Sonnet |
 | Chat real | 0 | **bloqueio: não há conversa real no banco** |
 
 Detalhes e licenças: [docs/emocoes/fontes.md](../emocoes/fontes.md).
@@ -62,4 +62,5 @@ como neutra.
 ```bash
 uv run manage.py migrate
 uv run manage.py importar_brighter   # baixa para data/brighter/ se preciso
+uv run manage.py importar_goemotions # precisa de data/goemotions/traduzido.jsonl (ver fontes.md)
 ```

@@ -661,3 +661,22 @@ class RotuloEmocaoTest(TestCase):
                 w.writerows(linhas)
             with self.assertRaises(CommandError):
                 call_command("anotacao", "importar", str(arq), anotador="c", stdout=io.StringIO())
+
+    def test_importar_goemotions(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+
+        from .models import RotuloEmocao
+
+        with tempfile.TemporaryDirectory() as d:
+            arq = Path(d) / "t.jsonl"
+            arq.write_text(json.dumps({"id": "e1", "split": "dev", "texto": "x", "ekman": ["anger", "fear"],
+                                       "original": [], "texto_pt": "[NAME] me assustou, que raiva"}) + "\n")
+            call_command("importar_goemotions", arquivo=arq, stdout=open("/dev/null", "w"))
+        r = RotuloEmocao.objects.get()
+        self.assertEqual(r.emocoes, ["raiva", "medo"])
+        self.assertEqual(r.mensagem.conversa.origem_id, "dev_e1")
+        self.assertTrue(r.mensagem.texto.startswith("[NOME]"))

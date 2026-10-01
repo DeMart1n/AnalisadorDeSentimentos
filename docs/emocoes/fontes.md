@@ -7,7 +7,7 @@ Nenhum dado destas fontes é commitado. Os comandos de importação baixam para 
 |---|---|---|---|
 | `brighter_ptbr` | importada | CC BY 4.0 | `uv run manage.py importar_brighter` |
 | `apps_zenodo` | **rejeitada** | CC BY 4.0 | — |
-| `goemotions_pt` | pendente (opcional) | Apache 2.0 (original) | — |
+| `goemotions_pt` | importada (subconjunto traduzido) | Apache 2.0 (original) | `scripts/goemotions_lotes.py` + `importar_goemotions` |
 
 ## BRIGHTER PT-BR (SemEval-2025 Task 11)
 
@@ -38,5 +38,24 @@ Rótulo único por texto (3.011 linhas). Não importar sem o texto bruto e sem u
 
 ## GoEmotions traduzido
 
-Pendente. Falta decidir o tradutor. Mapeamento previsto: o oficial do GoEmotions para Ekman,
-com `curiosity`, `confusion` e `realization` fora de surpresa.
+- Origem: <https://github.com/google-research/google-research/tree/master/goemotions>
+  (Demszky et al., 2020). 58 mil comentários do Reddit, 27 emoções. Licença Apache 2.0.
+- **Mapeamento para Ekman:** o oficial (`ekman_mapping.json`), **exceto surpresa**, que fica
+  só com `surprise`. `curiosity`, `confusion` e `realization` não viram surpresa; texto que só
+  tem essas três é descartado (4.141 textos). Sem isso, toda pergunta do chat viraria surpresa.
+  Cuidado: no mapeamento oficial, `approval`, `admiration` e `caring` entram em alegria e
+  `disapproval` e `annoyance` entram em raiva; é uma alegria e uma raiva mais amplas que as do guia.
+- **Subconjunto (seed 42):** tudo que tem raiva, medo, surpresa, nojo ou tristeza (13.596), mais
+  4.000 só de alegria e 3.000 neutros, num total de 20.596. Split original preservado no
+  `origem_id` (`train_<id>`, `dev_<id>`, `test_<id>`): 16.489 / 2.048 / 2.059.
+- **Tradução (30/09/2026):** Claude Sonnet, em 26 lotes de 800 numa sessão do Claude Code na nuvem,
+  com um prompt que manda preservar o tom, o sarcasmo, os palavrões e os emojis em PT-BR
+  informal. Piloto de 400 conferido à mão.
+  `scripts/goemotions_lotes.py juntar` valida ids e ordem. 28 linhas ficaram idênticas ao
+  original porque são intraduzíveis ("[NAME]!", "RemindMe! 3 days", "XD"); 4 perderam um `[NAME]`.
+- Na importação, `[NAME]` vira `[NOME]`, o marcador do nosso anonimizador.
+- Suporte: alegria 5.228, raiva 7.022, tristeza 4.032, medo 929, surpresa 1.330, nojo 1.013,
+  neutro 3.000.
+- Para refazer: `python3 scripts/goemotions_lotes.py lotes`, traduzir os lotes
+  (`lote_NNN.pt.jsonl`), `python3 scripts/goemotions_lotes.py juntar` e
+  `uv run manage.py importar_goemotions`.
