@@ -1,7 +1,7 @@
 # Módulo Modelo de Emoções
 
-**Estado: em construção (Fases 0–3 do plano, 30/09/2026).** O esquema e o primeiro dataset
-público estão prontos. Ainda não há modelo treinado. Falta chat real para anotar.
+**Estado: em construção (Fases 0–3 e 6 do plano, 30/09/2026).** Esquema, BRIGHTER, GoEmotions-PT e
+o código do modelo estão prontos. O modelo ainda não foi treinado de verdade (só um teste de fumaça). Falta chat real para anotar.
 
 Classificador **separado** da polaridade (que continua em [03-MODELO-IA.md](03-MODELO-IA.md)).
 Taxonomia de Ekman, multi-rótulo: `alegria`, `raiva`, `tristeza`, `medo`, `surpresa`, `nojo`.
@@ -57,10 +57,37 @@ conversas longas não dominem. Só entram mensagens do cliente; a coluna `anteri
 contexto. Uma linha sem nenhum 1 (nem em `neutro`) é tratada como "não anotada" e pulada, não
 como neutra.
 
+## 4. Modelo (`analise/modelos/emocoes.py`)
+
+| Item | Escolha |
+|---|---|
+| Base | `neuralmind/bert-base-portuguese-cased` |
+| Entrada | par (mensagem anterior, mensagem atual), `max_len` 128; sem anterior, o primeiro segmento fica vazio |
+| Cabeça | 6 saídas sigmoide |
+| Perda | `BCEWithLogitsLoss` com `pos_weight` = neg/pos por emoção, calculado sobre a distribuição **ponderada** do sorteio, com teto de 50 |
+| Otimização | AdamW, lr 2e-5, OneCycle (10% de aquecimento), batch 32, 2 épocas |
+| Limiares | um por emoção, grade 0,05–0,95, o que maximiza o F1 na validação; salvos em `models/emocoes/limiares.json` |
+| Amostragem | `WeightedRandomSampler` com `PESO_FONTE` (GoEmotions-PT 0,3; demais 1) |
+| Duas etapas | `--duas-etapas`: depois da etapa 1, 1 época com lr 1e-5 só com exemplos de chat (exige que existam) |
+| Guarda | treinado = `config.json` + `model.safetensors` + `limiares.json` |
+
+Os textos já chegam anonimizados, porque os importadores aplicam `anonimizar_texto`.
+
+**Rótulo por mensagem:** se houver mais de um, vale a prioridade humano > dataset original > LLM.
+**Split:** o original de cada fonte pública (`train` → treino, `dev` → validação, `test` →
+`teste_<fonte>`). Fonte sem split congelado (chat real, sintético) faz `split_emocoes` falhar,
+em vez de deixá-la vazar para o treino.
+
+**Avaliação:** `avaliar_emocoes` reporta, **por conjunto de teste e separadamente**, o F1 por
+emoção com IC 95% (bootstrap de 1.000 reamostragens), o F1 macro e micro, o suporte e os limiares.
+`--salvar` grava em `models/metricas_emocoes.json`.
+
 ## Como regenerar
 
 ```bash
 uv run manage.py migrate
 uv run manage.py importar_brighter   # baixa para data/brighter/ se preciso
 uv run manage.py importar_goemotions # precisa de data/goemotions/traduzido.jsonl (ver fontes.md)
+uv run manage.py treinar_emocoes --epocas 2 --batch 32
+uv run manage.py avaliar_emocoes --salvar
 ```
