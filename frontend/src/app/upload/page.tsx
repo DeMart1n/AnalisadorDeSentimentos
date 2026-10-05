@@ -6,14 +6,16 @@ import { useAuth } from '@/lib/auth';
 import { api, UploadResponse, AnalisarResponse } from '@/lib/api';
 import { useMutation } from '@tanstack/react-query';
 import axios from 'axios';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function UploadPage() {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
   
   const [file, setFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadDetails, setUploadDetails] = useState<string[]>([]);
   const [uploadSuccess, setUploadSuccess] = useState<UploadResponse | null>(null);
   
   const [analysisSuccess, setAnalysisSuccess] = useState<AnalisarResponse | null>(null);
@@ -23,24 +25,18 @@ export default function UploadPage() {
       const formData = new FormData();
       formData.append('arquivo', selectedFile);
       const res = await api.post<UploadResponse>('/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       return res.data;
     },
     onSuccess: (data) => {
       setUploadSuccess(data);
       setUploadError(null);
-      setUploadDetails([]);
     },
     onError: (error: unknown) => {
       setUploadSuccess(null);
-      setAnalysisSuccess(null);
       if (axios.isAxiosError(error) && error.response?.data) {
-        const { erro, detalhes } = error.response.data;
-        setUploadError(Array.isArray(erro) ? erro[0] : erro);
-        if (detalhes) setUploadDetails(detalhes);
+        setUploadError(error.response.data.erro || 'Erro ao processar arquivo.');
       } else {
         setUploadError('Falha ao processar o arquivo. Verifique se o formato está correto.');
       }
@@ -49,6 +45,7 @@ export default function UploadPage() {
 
   const analisarMutation = useMutation({
     mutationFn: async (fonte: string) => {
+      // Trigger the classification using the ML endpoint
       const res = await api.post<AnalisarResponse>('/conversas/analisar', { 
         fonte,
         modelo: 'bertimbau',
@@ -60,7 +57,7 @@ export default function UploadPage() {
       setAnalysisSuccess(data);
     },
     onError: () => {
-      setUploadError('A importação foi bem sucedida, mas ocorreu um erro ao disparar a classificação via IA.');
+      setUploadError('Erro ao disparar a classificação via IA. Tente novamente.');
     }
   });
 
@@ -68,7 +65,6 @@ export default function UploadPage() {
     return (
       <AppLayout title="Acesso Negado">
         <div className="bg-error-container text-on-error-container p-6 rounded-xl border border-red-200">
-          <h2 className="text-lg font-bold mb-2">Restrição de Privilégios</h2>
           <p>Você não possui permissão (ADMIN) para enviar novas conversas para o sistema.</p>
         </div>
       </AppLayout>
@@ -81,29 +77,11 @@ export default function UploadPage() {
       setUploadSuccess(null);
       setAnalysisSuccess(null);
       setUploadError(null);
-      setUploadDetails([]);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setFile(e.dataTransfer.files[0]);
-      setUploadSuccess(null);
-      setAnalysisSuccess(null);
-      setUploadError(null);
-      setUploadDetails([]);
     }
   };
 
   const handleProcess = () => {
-    if (file) {
-      uploadMutation.mutate(file);
-    }
+    if (file) uploadMutation.mutate(file);
   };
 
   const handleAnalyze = () => {
@@ -112,160 +90,198 @@ export default function UploadPage() {
     }
   };
 
+  // Mocked History Data for UI Fidelity (as per Stitch Design)
+  const mockHistory = [
+    { id: 'LT-0982', date: 'Hoje, 09:41', file: 'conversas-acessozap-12.json', status: 'concluido', msgs: 1420 },
+    { id: 'LT-0981', date: 'Ontem, 16:30', file: 'historico-zendesk-q3.csv', status: 'concluido', msgs: 3050 },
+    { id: 'LT-0980', date: 'Ontem, 11:15', file: 'chat-bot-fallback.csv', status: 'erro', msgs: 0 },
+  ];
+
   return (
     <AppLayout 
       title="Inserir Conversas" 
-      subtitle="Envie lotes de conversas em formato JSON ou CSV para processamento. A classificação de sentimentos será computada na sequência."
+      subtitle="Faça o upload de lotes brutos e processe-os no motor de IA para extração de insights emocionais."
     >
-      <section className="grid grid-cols-1 gap-gutter-desktop items-start">
-        <div className="flex flex-col gap-space-md">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-space-xl items-start">
+        {/* Coluna Principal: Upload */}
+        <div className="xl:col-span-2 flex flex-col gap-space-lg">
           
-          {!file && (
+          {/* Caixa de Upload */}
+          {!uploadSuccess && (
             <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-space-lg flex flex-col shadow-sm">
-              <div className="flex items-center justify-between mb-space-sm">
-                <span className="font-label-md text-label-md font-semibold text-on-surface flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary">cloud_upload</span>
-                  Upload de Lote
-                </span>
-                <span className="text-label-sm font-label-sm px-2.5 py-0.5 rounded-full bg-surface-container text-primary font-medium">Lotes até 50MB</span>
+              <div className="flex items-center justify-between mb-space-md">
+                <h2 className="font-headline-sm text-headline-sm font-semibold text-on-surface">Nova Importação</h2>
+                <span className="text-xs font-semibold px-2 py-1 rounded bg-surface-container text-outline">Lim: 50MB</span>
               </div>
               
-              <div 
-                className="border-2 border-dashed border-outline-variant rounded-xl bg-surface p-space-xl flex flex-col items-center justify-center text-center hover:border-primary hover:bg-surface-container-low transition-all duration-200 cursor-pointer min-h-[260px]"
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input 
-                  type="file" 
-                  accept=".json,.csv" 
-                  className="hidden" 
-                  ref={fileInputRef} 
-                  onChange={handleFileChange} 
-                />
-                <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center text-primary mb-space-md shadow-sm pointer-events-none">
-                  <span className="material-symbols-outlined text-3xl">upload_file</span>
-                </div>
-                <h2 className="font-headline-sm text-headline-sm font-semibold text-on-surface mb-1 pointer-events-none">
-                  Arraste seu arquivo aqui ou clique para selecionar
-                </h2>
-                <p className="font-body-sm text-body-sm text-on-surface-variant max-w-sm mb-space-md pointer-events-none">
-                  Suporte para arquivos .JSON e .CSV (UTF-8)
-                </p>
-                <button 
-                  className="inline-flex items-center gap-2 px-space-md py-2 rounded-lg bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-all duration-150 active:scale-95 shadow-sm"
-                  type="button"
+              {!file ? (
+                <div 
+                  className="border-2 border-dashed border-outline-variant rounded-xl bg-surface p-space-xl flex flex-col items-center justify-center text-center hover:border-primary hover:bg-surface-container-low transition-all duration-200 cursor-pointer min-h-[280px]"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      setFile(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  <span className="material-symbols-outlined text-lg">folder_open</span>
-                  Selecionar Arquivo
-                </button>
-              </div>
-            </div>
-          )}
-
-          {file && !uploadSuccess && (
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-space-lg shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-headline-sm text-headline-sm font-semibold text-on-surface flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary">task_alt</span>
-                  Lote Preparado
-                </h2>
-                <button className="text-error font-label-sm px-2 py-1 hover:bg-red-50 rounded" onClick={() => setFile(null)}>
-                  Cancelar
-                </button>
-              </div>
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-space-lg border-t border-outline-variant pt-4">
-                <div className="flex items-start gap-space-md">
-                  <div className="w-12 h-12 rounded-xl bg-surface-container-low border border-outline-variant flex items-center justify-center text-primary shrink-0">
-                    <span className="material-symbols-outlined text-2xl">description</span>
+                  <input type="file" accept=".json,.csv" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+                  <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center text-primary mb-4 shadow-sm">
+                    <span className="material-symbols-outlined text-3xl">upload_file</span>
                   </div>
-                  <div className="flex flex-col">
-                    <span className="font-headline-sm text-headline-sm font-bold text-on-surface font-mono">{file.name}</span>
-                    <p className="text-body-sm text-on-surface-variant mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <button 
-                    onClick={handleProcess}
-                    disabled={uploadMutation.isPending}
-                    className="inline-flex items-center gap-2 px-space-lg py-2.5 rounded-lg bg-primary-container hover:bg-primary text-on-primary font-label-md text-label-md font-semibold transition-all shadow-sm disabled:opacity-50"
-                  >
-                    <span className="material-symbols-outlined text-xl">{uploadMutation.isPending ? 'sync' : 'upload'}</span>
-                    {uploadMutation.isPending ? 'Importando...' : 'Fazer Upload'}
-                  </button>
-                </div>
-              </div>
-
-              {uploadError && (
-                <div className="mt-4 p-4 bg-error-container text-on-error-container rounded-lg">
-                  <div className="font-semibold">{uploadError}</div>
-                  {uploadDetails.length > 0 && (
-                    <ul className="mt-2 list-disc list-inside text-sm font-mono max-h-40 overflow-y-auto custom-scrollbar">
-                      {uploadDetails.map((det, idx) => (
-                        <li key={idx}>{det}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {uploadSuccess && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-space-lg shadow-sm">
-              <div className="flex items-center gap-2 text-emerald-800 mb-4">
-                <span className="material-symbols-outlined text-emerald-600">check_circle</span>
-                <h2 className="font-headline-sm font-semibold">Upload Concluído</h2>
-              </div>
-              <p className="text-emerald-700 text-body-md mb-2">
-                O arquivo <strong>{file?.name}</strong> (fonte: {uploadSuccess.fonte}) foi importado com sucesso.
-              </p>
-              <ul className="list-disc list-inside text-emerald-700 text-body-sm mb-6">
-                <li>Conversas importadas: {uploadSuccess.conversas}</li>
-                <li>Mensagens processadas e anonimizadas: {uploadSuccess.mensagens}</li>
-              </ul>
-              
-              {!analysisSuccess ? (
-                <div className="border-t border-emerald-200 pt-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-emerald-800">Classificação Pendente</h3>
-                    <p className="text-sm text-emerald-700">As mensagens ainda não têm sentimento atribuído.</p>
-                  </div>
-                  <button 
-                    onClick={handleAnalyze}
-                    disabled={analisarMutation.isPending}
-                    className="inline-flex items-center gap-2 px-space-lg py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-label-md text-label-md font-semibold transition-all disabled:opacity-50 shadow-sm"
-                  >
-                    <span className="material-symbols-outlined text-xl">{analisarMutation.isPending ? 'sync' : 'bolt'}</span>
-                    {analisarMutation.isPending ? 'Classificando via BERT...' : 'Classificar com IA'}
+                  <h3 className="font-headline-sm text-lg font-semibold text-on-surface mb-1">
+                    Arraste seu arquivo aqui ou clique para selecionar
+                  </h3>
+                  <p className="text-sm text-outline max-w-sm mb-6">
+                    São suportados arquivos estruturados em .JSON ou .CSV (codificação UTF-8)
+                  </p>
+                  <button className="px-6 py-2 rounded-lg bg-primary text-white font-label-md text-sm font-semibold hover:bg-primary/90 transition-all shadow-sm">
+                    Procurar no Computador
                   </button>
                 </div>
               ) : (
-                <div className="border-t border-emerald-200 pt-4">
-                  <h3 className="font-semibold text-emerald-800 flex items-center gap-2">
-                    <span className="material-symbols-outlined">auto_awesome</span>
-                    Classificação Finalizada
-                  </h3>
-                  <p className="text-sm text-emerald-700 mt-1">
-                    Foram classificadas {analysisSuccess.mensagens_classificadas} mensagens utilizando o modelo <strong>{analysisSuccess.modelo_utilizado}</strong>.
-                  </p>
+                <div className="border border-outline-variant rounded-xl bg-surface-container-lowest p-6 flex flex-col">
+                  <div className="flex items-start justify-between mb-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-lg bg-[#eef2ff] text-[#4f46e5] flex items-center justify-center">
+                        <span className="material-symbols-outlined text-2xl">description</span>
+                      </div>
+                      <div>
+                        <div className="font-semibold text-on-surface text-lg">{file.name}</div>
+                        <div className="text-sm text-outline">{(file.size / 1024 / 1024).toFixed(2)} MB</div>
+                      </div>
+                    </div>
+                    <button className="w-8 h-8 rounded-full flex items-center justify-center text-outline hover:bg-surface-container hover:text-error transition-colors" onClick={() => setFile(null)}>
+                      <span className="material-symbols-outlined text-xl">close</span>
+                    </button>
+                  </div>
+                  
                   <button 
-                    onClick={() => {
-                      setFile(null);
-                      setUploadSuccess(null);
-                      setAnalysisSuccess(null);
-                    }}
-                    className="mt-4 px-4 py-2 bg-emerald-100 text-emerald-800 rounded font-medium hover:bg-emerald-200 transition-colors"
+                    onClick={handleProcess}
+                    disabled={uploadMutation.isPending}
+                    className="w-full py-3 rounded-lg bg-primary hover:bg-primary/90 text-white font-label-md font-semibold transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-50"
                   >
-                    Fazer novo upload
+                    {uploadMutation.isPending ? <span className="material-symbols-outlined animate-spin">sync</span> : <span className="material-symbols-outlined">upload</span>}
+                    {uploadMutation.isPending ? 'Importando Lote...' : 'Iniciar Importação Segura'}
                   </button>
+                </div>
+              )}
+
+              {uploadError && (
+                <div className="mt-4 p-4 bg-[#fff1f2] border border-[#fecdd3] text-[#9f1239] rounded-lg text-sm font-medium flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[18px]">error</span>
+                  {uploadError}
                 </div>
               )}
             </div>
           )}
 
+          {/* Estado de Sucesso / Lote Pronto para Análise */}
+          {uploadSuccess && (
+            <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-space-lg flex flex-col shadow-sm">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-full bg-[#ecfdf5] text-[#10b981] flex items-center justify-center">
+                  <span className="material-symbols-outlined">task_alt</span>
+                </div>
+                <div>
+                  <h2 className="font-headline-sm text-headline-sm font-semibold text-on-surface">Lote Pronto para Análise</h2>
+                  <p className="text-sm text-outline">O arquivo foi verificado e salvo com sucesso no banco de dados.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="p-4 border border-outline-variant rounded-lg bg-surface-container-low text-center">
+                  <div className="text-2xl font-bold text-on-surface">{uploadSuccess.conversas}</div>
+                  <div className="text-xs uppercase tracking-wider text-outline font-semibold">Conversas Únicas</div>
+                </div>
+                <div className="p-4 border border-outline-variant rounded-lg bg-surface-container-low text-center">
+                  <div className="text-2xl font-bold text-on-surface">{uploadSuccess.mensagens}</div>
+                  <div className="text-xs uppercase tracking-wider text-outline font-semibold">Mensagens Lidas</div>
+                </div>
+              </div>
+
+              {!analysisSuccess ? (
+                <div className="flex flex-col border-t border-outline-variant pt-6">
+                  <h3 className="font-semibold text-on-surface mb-2">Classificação Neural Pendente</h3>
+                  <p className="text-sm text-on-surface-variant mb-6">
+                    O motor <strong>BERTimbau</strong> será acionado para ler cada mensagem, processar o contexto e assinalar os sentimentos (Positivo, Negativo ou Neutro). Este processo pode demorar alguns minutos dependendo do volume de dados.
+                  </p>
+                  <button 
+                    onClick={handleAnalyze}
+                    disabled={analisarMutation.isPending}
+                    className="w-full py-3 rounded-lg bg-[#4f46e5] text-white font-label-md font-semibold hover:bg-[#4338ca] transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-70"
+                  >
+                    {analisarMutation.isPending ? <span className="material-symbols-outlined animate-spin text-xl">sync</span> : <span className="material-symbols-outlined text-xl">psychology</span>}
+                    {analisarMutation.isPending ? 'Analisando via BERTimbau...' : 'Iniciar Classificação por IA'}
+                  </button>
+                  {analisarMutation.isPending && (
+                    <p className="text-center text-xs text-outline mt-3">
+                      Por favor, aguarde. O tempo médio é de ~50ms por mensagem...
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col border-t border-outline-variant pt-6">
+                  <div className="p-4 bg-[#ecfdf5] border border-[#a7f3d0] rounded-lg flex flex-col items-center justify-center text-center">
+                    <span className="material-symbols-outlined text-3xl text-[#10b981] mb-2">auto_awesome</span>
+                    <h3 className="font-semibold text-[#065f46] text-lg">Classificação Finalizada!</h3>
+                    <p className="text-sm text-[#047857] mt-1 mb-4">
+                      Todas as {analysisSuccess.mensagens_classificadas} mensagens foram classificadas com sucesso.
+                    </p>
+                    <div className="flex items-center gap-3 w-full">
+                      <button 
+                        onClick={() => router.push('/conversas')}
+                        className="flex-1 py-2 rounded bg-white border border-[#a7f3d0] text-[#065f46] font-semibold text-sm hover:bg-gray-50 transition-colors"
+                      >
+                        Ver Conversas
+                      </button>
+                      <button 
+                        onClick={() => router.push('/')}
+                        className="flex-1 py-2 rounded bg-[#10b981] text-white font-semibold text-sm hover:bg-[#059669] transition-colors"
+                      >
+                        Ir para Dashboard
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      </section>
+
+        {/* Coluna Secundária: Histórico (Mock Visual) */}
+        <div className="xl:col-span-1 bg-surface-container-lowest rounded-xl border border-outline-variant p-space-lg shadow-sm">
+          <div className="flex items-center gap-2 mb-space-md pb-space-sm border-b border-outline-variant">
+            <span className="material-symbols-outlined text-outline">history</span>
+            <h2 className="font-headline-sm text-lg font-semibold text-on-surface">Histórico Recente</h2>
+          </div>
+          
+          <div className="flex flex-col gap-4">
+            {mockHistory.map((item) => (
+              <div key={item.id} className="flex flex-col gap-2 p-3 rounded-lg border border-surface-container-high bg-surface hover:bg-surface-container-lowest transition-colors group">
+                <div className="flex justify-between items-start">
+                  <span className="font-mono text-xs font-bold text-outline group-hover:text-primary transition-colors">#{item.id}</span>
+                  <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${item.status === 'concluido' ? 'bg-[#ecfdf5] text-[#10b981]' : 'bg-[#fff1f2] text-[#ef4444]'}`}>
+                    {item.status}
+                  </span>
+                </div>
+                <div className="font-medium text-sm text-on-surface truncate" title={item.file}>{item.file}</div>
+                <div className="flex justify-between items-center mt-1">
+                  <span className="text-xs text-outline">{item.date}</span>
+                  <span className="text-xs font-semibold text-on-surface-variant flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">chat</span> {item.msgs}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <button className="w-full mt-4 py-2 text-xs font-bold text-primary hover:bg-primary/10 rounded transition-colors uppercase tracking-wider">
+            Ver Todo o Histórico
+          </button>
+        </div>
+      </div>
     </AppLayout>
   );
 }
