@@ -139,3 +139,11 @@ interface ApiErro {
 4. **Filtro Client-Side:** Como a rota de listagem suporta apenas `fonte` e `limite`, toda filtragem por sentimento na tela 2 será executada via JavaScript no frontend, operando na coleção recebida.
 5. **Indicadores Null:** Sempre considerar `indicadores: null` na listagem (exibir "Não Classificado" e não quebrar o layout).
 6. **CSRF Desligado:** Nenhuma submissão do front vai buscar cookie `csrftoken` (as rotas do backend usam `@csrf_exempt`).
+
+## 6. Acompanhamento & Relatórios Semanais
+
+Para facilitar o acompanhamento do desenvolvimento e prover insumo estruturado para o **Artigo Científico** e **Relatórios de Extensão Universitária**, os dois documentos a seguir são mantidos e atualizados semanalmente:
+
+- 🛠️ [Relatório Técnico Semanal](file:///c:/Users/ciacc/OneDrive/Documentos/AnalisadorDeSentimentos/docs/relatorios/RELATORIO_TECNICO.md): Detalhamento de código, arquitetura, rotas, Next.js, Tailwind e integrações REST.
+- 📄 [Relatório de Divulgação Científica / Leigo](file:///c:/Users/ciacc/OneDrive/Documentos/AnalisadorDeSentimentos/docs/relatorios/RELATORIO_LEIGO.md): Resumo executivo em linguagem acessível, abordando aspectos de IHC (Interação Humano-Computador), visualização de dados e impacto para a escrita do artigo.
+
