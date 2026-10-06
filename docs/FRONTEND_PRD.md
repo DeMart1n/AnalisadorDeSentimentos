@@ -23,19 +23,16 @@ O frontend é uma aplicação de analytics (dashboard) para explorar resultados 
 
 As telas foram desenhadas no Stitch (Projeto: *SentimentIQ Analytics Dashboard* - ID `projects/18398547391647593690`).
 
-| Tela | Stitch ID / Ref | Endpoints Consumidos | Observações |
-|---|---|---|---|
-| **Login** | `f407377a4e1d460ca123d4d751871b2d` | `POST /api/login`, `POST /api/register`, `POST /api/refresh` | Redireciona o usuário e armazena os tokens de acesso e refresh. |
-| **Dashboard Principal** | `976e6a8354474f69a9a0dbe4780a5ffa` | `GET /api/metricas` | Precisa lidar graciosamente com ausência de dados (distribuição vazia). |
-| **Inserir Conversas** | `28aa1c5bcf4f4b9282621e0a7ca0c04d` | `POST /api/upload`, `POST /api/conversas/analisar` | Exige permissão `ADMIN`. Usuários com role `USER` não devem ver ou ter acesso funcional a esta tela. |
-| **Listagem de Conversas** | `b96b713aff674d65a45bcce0271ecd3f` | `GET /api/conversas` | O filtro de sentimento e texto será feito **client-side** em cima do limite de 500 retornados pela API. |
-| **Detalhe da Conversa** | `d2b736aa96ab46afb2a1bee44b539d82` | `GET /api/conversas/<id>` | Renderiza a timeline de mensagens com as cores baseadas no sentimento. |
+| Tela | Stitch ID / Ref | Endpoints Consumidos | Status | Observações |
+|---|---|---|---|---|
+| **Login** | `f407377a4e1d460ca123d4d751871b2d` | `POST /api/login`, `POST /api/register`, `POST /api/refresh` | Concluída | Layout split 50/50 com cards demonstrativos, persistência de JWT e redirecionamento. |
+| **Dashboard Principal** | `976e6a8354474f69a9a0dbe4780a5ffa` | `GET /api/metricas`, `GET /api/conversas?limite=500` | Concluída | KPIs de topo, Donut Chart (Recharts) de distribuição, Bar Chart de F1-Macro e tabela de casos críticos com queda de delta. |
+| **Inserir Conversas** | `28aa1c5bcf4f4b9282621e0a7ca0c04d` | `POST /api/upload`, `POST /api/conversas/analisar` | Concluída | Drag & drop para CSV/JSON, histórico de importações e gatilho de classificação com IA (BERTimbau). |
+| **Listagem de Conversas** | `b96b713aff674d65a45bcce0271ecd3f` | `GET /api/conversas?limite=500` | Concluída | Filtros client-side instantâneos (Todas, Críticas, Positivas, Com Queda, Pendentes) e badges de status. |
+| **Detalhe da Conversa** | `d2b736aa96ab46afb2a1bee44b539d82` | `GET /api/conversas/<id>` | Concluída | Cards analíticos, gráfico de evolução temporal (LineChart com ReferenceDot de pior momento) e chat bubbles categorizadas. |
 
-*Ordem de Implementação:*
-1. Upload (Inserir Conversas)
-2. Detalhe da Conversa
-3. Listagem de Conversas
-4. Dashboard
+*Status Geral de Implementação:*
+Todas as 5 telas principais foram desenvolvidas e estão conectadas ao backend Django local, incluindo suporte a gráficos interativos e empty states resilientes.
 
 ## 4. Contratos de API (Tipagem Base)
 
@@ -131,11 +128,19 @@ interface ApiErro {
 }
 ```
 
-## 5. Pontos de Atenção & Riscos Assumidos
+## 5. Pontos de Atenção & Decisões Técnicas Aplicadas
 
-1. **CORS:** O documento mais recente de API menciona que o middleware preflight resolve o CORS. Confirmaremos testando. Caso falhe, a mitigação será configurar `rewrites` no `next.config.js`.
-2. **Sem dados no Dashboard:** O banco atualmente contém mensagens, mas a maioria delas não foi classificada. A UI do dashboard assumirá dados em zero/incompletos como caso normal (empty states amigáveis).
-3. **Score Relativo:** O `score` retornado pode ser probabilidade ou soma de pesos (caso do Léxico). A UI não apresentará esse dado como "porcentagem de certeza" de forma ingênua, já que sua semântica muda por modelo.
-4. **Filtro Client-Side:** Como a rota de listagem suporta apenas `fonte` e `limite`, toda filtragem por sentimento na tela 2 será executada via JavaScript no frontend, operando na coleção recebida.
-5. **Indicadores Null:** Sempre considerar `indicadores: null` na listagem (exibir "Não Classificado" e não quebrar o layout).
-6. **CSRF Desligado:** Nenhuma submissão do front vai buscar cookie `csrftoken` (as rotas do backend usam `@csrf_exempt`).
+1. **CORS:** Configurado no Django com cabeçalhos permissivos para o frontend local em `localhost:3000`.
+2. **Resiliência a Empty States:** Quando o banco possui conversas mas sem rótulos ou sem matrizes de teste geradas via `avaliar --salvar`, o frontend renderiza estados vazios descritivos sem quebrar o layout.
+3. **Biblioteca de Gráficos (Recharts):** Gráficos de rosca (`PieChart`), barras (`BarChart`) e linhas temporais (`LineChart`) integrados com `ResponsiveContainer`, tooltips dinâmicos e tipagem TypeScript adaptada.
+4. **Filtro Client-Side:** Como a rota `/conversas` retorna até 500 registros, os filtros por status e declínio de sentimento operam diretamente em memória para resposta instantânea.
+5. **Classificação via IA sob Demanda:** A tela `/upload` possui acionamento direto para `/api/conversas/analisar`, enviando parâmetros de modelo (padrão: `bertimbau`) e flag de processamento de pendentes.
+6. **Dependências do Modelo de IA:** No backend, foi necessária a instalação explícita de `torch` e `transformers` para possibilitar a inferência do modelo BERTimbau na API Django.
+
+## 6. Acompanhamento & Relatórios Periódicos
+
+Para facilitar o acompanhamento do desenvolvimento e prover insumo estruturado para o **Artigo Científico** e **Relatórios de Extensão Universitária**, os dois documentos a seguir são mantidos e atualizados periodicamente:
+
+- 🛠️ [Relatório Técnico](file:///c:/Users/ciacc/OneDrive/Documentos/AnalisadorDeSentimentos/docs/relatorios_frontend/RELATORIO_TECNICO.md): Detalhamento de código, arquitetura, rotas, Next.js, Tailwind, Recharts e integrações REST.
+- 📄 [Relatório de Divulgação Científica / Leigo](file:///c:/Users/ciacc/OneDrive/Documentos/AnalisadorDeSentimentos/docs/relatorios_frontend/RELATORIO_LEIGO.md): Resumo executivo em linguagem acessível, abordando aspectos de IHC (Interação Humano-Computador), visualização de dados e impacto para a escrita do artigo.
+
