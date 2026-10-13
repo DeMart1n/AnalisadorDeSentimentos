@@ -183,6 +183,16 @@ class ClassicoTest(SimpleTestCase):
         self.assertTrue(all(len(t) == 2 for t in termos.values()))
 
 
+class ClassicoBinarioTest(SimpleTestCase):
+    def test_termos_por_classe_com_duas_classes(self):
+        # binário: o sklearn guarda uma linha de coeficientes só, a da segunda classe
+        modelo = Classico()
+        modelo.treinar(["adorei muito", "adorei demais", "odiei muito", "odiei demais"] * 2,
+                       [POSITIVO, POSITIVO, NEGATIVO, NEGATIVO] * 2)
+        termos = modelo.termos_por_classe(n=1)
+        self.assertEqual(termos, {POSITIVO: ["adorei"], NEGATIVO: ["odiei"]})
+
+
 class LexicoArquivoTest(SimpleTestCase):
     def setUp(self):
         pasta = tempfile.TemporaryDirectory()

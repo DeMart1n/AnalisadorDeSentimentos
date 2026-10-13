@@ -36,10 +36,10 @@ def create(request):
             role=dto.role,
         )
         return JsonResponse(UserOutputDTO.from_model(user).to_dict(), status=201)
-    except ValueError as e:
-        return JsonResponse({"erro": e.args[0]}, status=400)
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
 
 @csrf_exempt
 @require_POST
@@ -57,10 +57,10 @@ def login(request):
             LoginOutputDTO.from_user(user, access_token, refresh_token).to_dict(),
             status=200
         )
-    except ValueError as e:
-        return JsonResponse({"erro": e.args[0]}, status=400)
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
 
 @csrf_exempt
 @require_POST
@@ -85,10 +85,10 @@ def refresh(request):
             refresh_token=new_refresh_token,
         )
         return JsonResponse(output.to_dict(), status=200)
-    except ValueError as e:
-        return JsonResponse({"erro": e.args[0]}, status=400)
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
 
 
 @csrf_exempt  # ponytail: app local sem autenticação nem sessão. Reativar CSRF quando entrar auth ou dado real de empresa.
@@ -156,10 +156,10 @@ def analisar(request):
 
     except ModeloNaoTreinado as e:
         return JsonResponse({"erro": str(e)}, status=503)
-    except ValueError as e:
-        return JsonResponse({"erro": e.args[0]}, status=400)
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
+    except ValueError as e:
+        return JsonResponse({"erro": e.args[0]}, status=400)
 
 
 @require_GET
@@ -167,7 +167,12 @@ def conversas(request):
     qs = Conversa.objects.all()
     if fonte := request.GET.get("fonte"):
         qs = qs.filter(fonte=fonte)
-    limite = min(int(request.GET.get("limite", 100)), 500)
+    try:
+        limite = min(int(request.GET.get("limite", 100)), 500)
+    except ValueError:
+        limite = 0
+    if limite < 1:
+        return JsonResponse({"erro": "limite deve ser um inteiro positivo"}, status=400)
 
     itens = []
     for conversa in qs.prefetch_related("mensagens")[:limite]:

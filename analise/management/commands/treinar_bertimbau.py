@@ -24,6 +24,8 @@ class Command(BaseCommand):
         treino, teste = dividir_por_conversa(dados, seed=opts["seed"])
         if opts["amostra"]:
             treino = treino[: opts["amostra"]]
+        if not treino:
+            raise CommandError("treino vazio — poucas conversas rotuladas")
 
         modelo = Bertimbau(epocas=opts["epocas"], batch=opts["batch"])
         self.stdout.write(f"dispositivo: {dispositivo()} | treino: {len(treino)} | teste reservado: {len(teste)}")

@@ -51,8 +51,13 @@ class AvaliarComandoTest(TempDirMixin, TestCase):
         _popular()
         # com proporcao 0.2 o split real nunca devolve teste vazio; forçamos o ramo
         with patch.object(cmd_avaliar, "dividir_por_conversa", lambda dados, seed: (dados, [])):
-            with self.assertRaisesMessage(CommandError, "conjunto de teste vazio"):
+            with self.assertRaisesMessage(CommandError, "treino ou teste vazio"):
                 _rodar("avaliar", "--modelos", "lexico")
+
+    def test_uma_conversa_so_deixa_treino_vazio_e_da_erro_claro(self):
+        _popular(n=1)
+        with self.assertRaisesMessage(CommandError, "treino ou teste vazio"):
+            _rodar("avaliar", "--modelos", "classico")
 
     def test_avalia_e_compara_modelos(self):
         _popular()
@@ -132,6 +137,23 @@ class ImportarConversasComandoTest(TempDirMixin, TestCase):
         self.assertEqual(err.getvalue().count("autor inválido"), 20)
         self.assertIn("... e mais 5 erro(s)", err.getvalue())
 
+    def test_arquivo_inexistente_erro(self):
+        with self.assertRaisesMessage(CommandError, "arquivo não encontrado"):
+            _rodar("importar_conversas", str(self.tmp / "nao_existe.csv"), "--fonte", "x")
+
+    def test_arquivo_fora_de_utf8_erro(self):
+        arquivo = self.tmp / "latin.csv"
+        arquivo.write_bytes("conversa_id,ordem,autor,texto\nc1,1,usuario,ação\n".encode("latin-1"))
+        with self.assertRaisesMessage(CommandError, "UTF-8"):
+            _rodar("importar_conversas", str(arquivo), "--fonte", "x")
+
+    def test_json_malformado_erro(self):
+        arquivo = self.tmp / "quebrado.json"
+        arquivo.write_text("[{", encoding="utf-8")
+        with self.assertRaisesMessage(CommandError, "JSON inválido"):
+            _rodar("importar_conversas", str(arquivo), "--fonte", "x")
+        self.assertEqual(Conversa.objects.count(), 0)
+
     def test_fonte_obrigatoria(self):
         with self.assertRaises(CommandError):
             _rodar("importar_conversas", str(self.tmp / "a.csv"))
@@ -167,6 +189,19 @@ class ImportarKaggleComandoTest(TempDirMixin, TestCase):
 
         _rodar("importar_kaggle", "--dir", str(self.tmp), "--bases", "olist", "--por-classe", "2")
         self.assertEqual(Conversa.objects.filter(fonte="olist").count(), 4)
+        self.assertEqual(Conversa.objects.filter(fonte="b2w").count(), 1)
+
+    def test_rating_nao_numerico_e_ignorado(self):
+        self._csv("b2w", [("bom", 5), ("estranho", "abc")])
+        out, _ = _rodar("importar_kaggle", "--dir", str(self.tmp), "--bases", "b2w", "--por-classe", "0")
+        self.assertIn("b2w: 1 reviews", out)
+
+    def test_csv_sem_reviews_validas_preserva_base_atual(self):
+        self._csv("b2w", [("bom", 5)])
+        _rodar("importar_kaggle", "--dir", str(self.tmp), "--bases", "b2w")
+        (self.tmp / "b2w.csv").write_text("texto,nota\nbom,5\n", encoding="utf-8")
+        with self.assertRaisesMessage(CommandError, "nada foi alterado"):
+            _rodar("importar_kaggle", "--dir", str(self.tmp), "--bases", "b2w")
         self.assertEqual(Conversa.objects.filter(fonte="b2w").count(), 1)
 
     def test_amostra_e_deterministica_pela_seed(self):
@@ -212,6 +247,12 @@ class TreinarBertimbauComandoTest(TestCase):
         self.assertIn("dispositivo: cpu-falso | treino: 24 | teste reservado: 6", out)
         self.assertIn("época 1 passo 5/10 perda 0.1235", out)
         self.assertIn("salvo em /tmp/fake-bertimbau", out)
+
+    def test_treino_vazio_erro(self, _dispositivo):
+        _popular(n=1)
+        with self.assertRaisesMessage(CommandError, "treino vazio"):
+            _rodar("treinar_bertimbau")
+        self.assertEqual(FakeBertimbau.instancias, [])
 
     def test_amostra_limita_treino(self, _dispositivo):
         _popular()

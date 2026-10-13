@@ -30,7 +30,11 @@ class Classico:
         """Quais termos pesam em cada classe — o motivo de manter este degrau."""
         vetorizador, modelo = self.pipeline[0], self.pipeline[-1]
         vocab = np.array(vetorizador.get_feature_names_out())
+        coefs = modelo.coef_
+        if len(modelo.classes_) == 2:
+            # binário: o sklearn guarda uma linha só, a da segunda classe; a primeira é o oposto
+            coefs = np.vstack([-coefs[0], coefs[0]])
         return {
-            classe: list(vocab[np.argsort(coefs)[-n:][::-1]])
-            for classe, coefs in zip(modelo.classes_, np.atleast_2d(modelo.coef_))
+            classe: list(vocab[np.argsort(c)[-n:][::-1]])
+            for classe, c in zip(modelo.classes_, coefs)
         }

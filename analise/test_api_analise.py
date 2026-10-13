@@ -84,6 +84,12 @@ class ApiAnaliseTest(TestCase):
         self.assertEqual(r.json()["total"], 2)
         self.assertEqual(len(r.json()["conversas"]), 1)
 
+    def test_lista_conversas_limite_invalido_da_400(self):
+        for limite in ("abc", "-1", "0"):
+            r = self.client.get("/api/conversas", {"limite": limite})
+            self.assertEqual(r.status_code, 400, limite)
+            self.assertIn("limite", r.json()["erro"])
+
     def test_lista_conversas_limite_tem_teto_de_500(self):
         Conversa.objects.bulk_create(Conversa(origem_id=f"x{i}", fonte="massa") for i in range(501))
         r = self.client.get("/api/conversas", {"fonte": "massa", "limite": 10000})
@@ -150,7 +156,7 @@ class ApiAnaliseTest(TestCase):
     def test_analisar_json_invalido(self):
         r = self._analisar("{fonte")
         self.assertEqual(r.status_code, 400)
-        self.assertIn("erro", r.json())
+        self.assertIn("JSON inválido", r.json()["erro"])
 
     def test_analisar_payload_que_nao_e_objeto(self):
         r = self._analisar([1, 2])
