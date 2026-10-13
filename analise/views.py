@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .classificador import classificar_conversas
 from .importacao import ErroDeImportacao, importar
 from .indicadores import indicadores
+from .modelos import ModeloNaoTreinado
 from .models import USUARIO, Conversa, Mensagem, Users
 from .dtos.user.create_user_dto import CreateUserDTO, UserOutputDTO
 from .dtos.user.login_dto import LoginUserDTO, LoginOutputDTO
@@ -153,6 +154,8 @@ def analisar(request):
         )
         return JsonResponse(output.to_dict(), status=200)
 
+    except ModeloNaoTreinado as e:
+        return JsonResponse({"erro": str(e)}, status=503)
     except ValueError as e:
         return JsonResponse({"erro": e.args[0]}, status=400)
     except json.JSONDecodeError as e:

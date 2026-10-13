@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 import os
 
 ALLOWED_MODELS = ("lexico", "classico", "bertimbau")
-STANDARD_MODEL = os.environ.get("STANDARD_MODEL")
+STANDARD_MODEL = os.environ.get("STANDARD_MODEL", "bertimbau")
 
 
 @dataclass(frozen=True)

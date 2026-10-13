@@ -12,6 +12,10 @@ Degraus: lexico (piso) -> classico (TF-IDF) -> bertimbau (alvo do projeto).
 from .classico import Classico
 from .lexico import Lexico
 
+class ModeloNaoTreinado(RuntimeError):
+    """Modelo sem pesos salvos: prever com ele daria resultado aleatório."""
+
+
 REGISTRO = {"lexico": Lexico, "classico": Classico, "bertimbau": None}
 
 
