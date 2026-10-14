@@ -82,6 +82,48 @@ em vez de deixá-la vazar para o treino.
 emoção com IC 95% (bootstrap de 1.000 reamostragens), o F1 macro e micro, o suporte e os limiares.
 `--salvar` grava em `models/metricas_emocoes.json`.
 
+## 5. Resultados — configuração A (BRIGHTER + GoEmotions-PT), 05/10/2026
+
+Treino: 18.715 exemplos, 2 épocas, batch 32, MPS (MacBook Air M4), **33,3 min**. Validação: 2.248
+(BRIGHTER dev 200 + GoEmotions dev 2.048). Limiares escolhidos: alegria 0,55, raiva 0,50,
+tristeza 0,85, medo 0,95, surpresa 0,90, nojo 0,95.
+
+| Emoção | BRIGHTER teste: F1 [IC 95%] | suporte | GoEmotions-PT teste: F1 [IC 95%] | suporte |
+|---|---|---|---|---|
+| alegria | 0,673 [0,643; 0,700] | 555 | 0,713 [0,678; 0,744] | 481 |
+| raiva | 0,638 [0,612; 0,666] | 699 | 0,692 [0,665; 0,716] | 726 |
+| tristeza | 0,587 [0,537; 0,633] | 343 | 0,664 [0,625; 0,700] | 379 |
+| medo | 0,346 [0,258; 0,421] | 139 | 0,663 [0,586; 0,730] | 98 |
+| surpresa | 0,381 [0,309; 0,453] | 157 | 0,620 [0,550; 0,680] | 141 |
+| nojo | 0,062 [0,000; 0,133] | 71 | 0,505 [0,422; 0,585] | 123 |
+| **F1 macro** | **0,448** | 2.226 | **0,643** | 2.059 |
+| F1 micro | 0,597 | | 0,676 | |
+
+O teste que importa é o do **BRIGHTER**: anotação humana feita direto em PT-BR. O GoEmotions-PT
+está na mesma distribuição do treino (mesma tradução, mesmo mapeamento), por isso o número dele
+sai inflado. Mesmo o BRIGHTER ainda é rede social, não chat; o teste principal continua sendo o
+`teste_chat`, que ainda não existe.
+
+Leitura dos gráficos (`docs/relatorio/img/emocoes/`):
+
+1. **Neutro quase não é previsto.** Das mensagens neutras, só 24% saem sem emoção nos dois
+   testes; 37–42% viram raiva e 21–30% viram alegria. Para chat, onde a maior parte das mensagens
+   é neutra ("ok", "segue o comprovante"), este é o problema mais grave.
+2. **Raiva absorve tudo.** É a coluna mais escura da matriz real × previsto: 59% do nojo, 35% do
+   medo e da surpresa e 29% da tristeza do BRIGHTER são previstos como raiva. Causa provável: o
+   mapeamento oficial do GoEmotions joga `annoyance` e `disapproval` em raiva, e 35% do treino
+   acaba com raiva.
+3. **Limiares ajustados para o GoEmotions.** 91% da validação vem do GoEmotions, por isso os
+   limiares de medo, surpresa e nojo ficaram em 0,90–0,95. Nas curvas PR do BRIGHTER, o ponto
+   escolhido fica em revocação baixa (medo: 0,26).
+4. **Nojo do BRIGHTER não foi aprendido.** A curva PR fica achatada em precisão ~0,15 em
+   qualquer limiar: o nojo do BRIGHTER (desprezo, quase sempre junto de raiva) é outro conceito,
+   diferente do `disgust` do Reddit. O plano já previa F1 baixo para nojo.
+5. **A 2ª época quase não mexeu na validação** (macro 0,57 → 0,57 com limiar 0,5), embora a perda
+   tenha continuado a cair. Mais épocas não é a alavanca.
+
+Sem nojo, o macro das 5 emoções-alvo no BRIGHTER é 0,525.
+
 ## Como regenerar
 
 ```bash
@@ -90,4 +132,5 @@ uv run manage.py importar_brighter   # baixa para data/brighter/ se preciso
 uv run manage.py importar_goemotions # precisa de data/goemotions/traduzido.jsonl (ver fontes.md)
 uv run manage.py treinar_emocoes --epocas 2 --batch 32
 uv run manage.py avaliar_emocoes --salvar
+uv run --with matplotlib python scripts/graficos_emocoes.py   # PNGs em docs/relatorio/img/emocoes/
 ```

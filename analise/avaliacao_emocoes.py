@@ -7,7 +7,7 @@ independentes, F1 por emoção e intervalo de confiança por bootstrap.
 from collections import defaultdict
 
 import numpy as np
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, multilabel_confusion_matrix
 
 from .models import EMOCOES, HUMANO, LLM, ORIGINAL_DATASET, USUARIO, Mensagem, RotuloEmocao
 
@@ -85,7 +85,13 @@ def metricas(y_true, y_pred, n_boot=1000, seed=42):
             "ic95": [round(float(lo), 4), round(float(hi), 4)],
             "suporte": int(y_true[:, i].sum()),
         }
+    # linha = emoção verdadeira (ou neutro), coluna = emoção prevista (ou neutro).
+    # Multi-rótulo: uma mensagem conta em várias células; mostra o que o modelo confunde com o quê.
+    vt = np.hstack([y_true, ~y_true.any(1, keepdims=True)]).astype(int)
+    vp = np.hstack([y_pred, ~y_pred.any(1, keepdims=True)]).astype(int)
     return {
+        "matriz_por_emocao": {e: m.tolist() for e, m in zip(EMOCOES, multilabel_confusion_matrix(y_true, y_pred))},
+        "coocorrencia": (vt.T @ vp).tolist(),
         "n": len(y_true),
         "f1_macro": round(float(f1_score(y_true, y_pred, average="macro", zero_division=0)), 4),
         "f1_micro": round(float(f1_score(y_true, y_pred, average="micro", zero_division=0)), 4),

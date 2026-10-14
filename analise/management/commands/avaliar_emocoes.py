@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import numpy as np
 from django.core.management.base import BaseCommand, CommandError
 
 from analise.avaliacao_emocoes import carregar_emocoes, metricas, split_emocoes
@@ -28,8 +29,11 @@ class Command(BaseCommand):
 
         resultado = {"limiares": dict(zip(EMOCOES, modelo.limiares)), "testes": {}}
         for nome, exemplos in testes.items():
-            y_pred, _ = modelo.prever(exemplos)
-            m = metricas([e["y"] for e in exemplos], y_pred)
+            y_pred, probs = modelo.prever(exemplos)
+            y_true = [e["y"] for e in exemplos]
+            m = metricas(y_true, y_pred)
+            # probabilidades brutas para curvas precisão-revocação (scripts/graficos_emocoes.py)
+            np.savez(modelo.destino / f"predicoes_{nome}.npz", y_true=y_true, probs=probs)
             resultado["testes"][nome] = m
             self.stdout.write(f"\n=== {nome} (n={m['n']}) — F1 macro {m['f1_macro']:.3f} | micro {m['f1_micro']:.3f}")
             for e, v in m["por_emocao"].items():

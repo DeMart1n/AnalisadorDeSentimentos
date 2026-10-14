@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from sklearn.metrics import f1_score
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -77,13 +78,14 @@ class Emocoes:
         """`chat`: exemplos só de chat para a etapa 2 (1 época, lr 1e-5). None = uma etapa só."""
         if self.treinado and not forcar:
             return
-        self._loop(treino, self.epocas, self.lr, progresso)
+        self.historico = {"perda": [], "validacao": []}
+        self._loop(treino, self.epocas, self.lr, progresso, validacao, etapa=1)
         if chat:
-            self._loop(chat, 1, self.lr / 2, progresso)
+            self._loop(chat, 1, self.lr / 2, progresso, validacao, etapa=2)
         self.limiares = ajustar_limiares(self.probabilidades(validacao), [e["y"] for e in validacao])
         self.salvar()
 
-    def _loop(self, exemplos, epocas, lr, progresso):
+    def _loop(self, exemplos, epocas, lr, progresso, validacao, etapa):
         peso = torch.tensor([PESO_FONTE.get(e["fonte"], 1.0) for e in exemplos], dtype=torch.double)
         amostrador = WeightedRandomSampler(peso, num_samples=len(exemplos), replacement=True)
         loader = DataLoader(_Dados(exemplos, self.tokenizer), batch_size=self.batch, sampler=amostrador)
@@ -107,14 +109,30 @@ class Emocoes:
                 otimizador.step()
                 escalonador.step()
                 otimizador.zero_grad()
+                if passo % 10 == 0:
+                    self.historico["perda"].append(
+                        {"etapa": etapa, "epoca": epoca + 1, "passo": passo, "total": len(loader),
+                         "perda": round(perda.item(), 4)})
                 if progresso and passo % 100 == 0:
                     progresso(epoca + 1, passo, len(loader), perda.item())
+            # F1 na validação ao fim de cada época, com limiar 0.5 (os ajustados só existem no fim)
+            y_val = np.array([e["y"] for e in validacao])
+            pred = self.probabilidades(validacao) >= 0.5
+            self.modelo.train()
+            self.historico["validacao"].append({
+                "etapa": etapa, "epoca": epoca + 1,
+                "f1_macro": round(float(f1_score(y_val, pred, average="macro", zero_division=0)), 4),
+                "f1_por_emocao": dict(zip(EMOCOES, f1_score(y_val, pred, average=None, zero_division=0)
+                                          .round(4).tolist())),
+            })
 
     def salvar(self):
         self.destino.mkdir(parents=True, exist_ok=True)
         self.modelo.save_pretrained(self.destino)
         self.tokenizer.save_pretrained(self.destino)
         (self.destino / "limiares.json").write_text(json.dumps(self.limiares))
+        if getattr(self, "historico", None):
+            (self.destino / "historico.json").write_text(json.dumps(self.historico, indent=1))
         self.treinado = True
 
     @torch.no_grad()
