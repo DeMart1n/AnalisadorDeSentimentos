@@ -118,10 +118,13 @@ Regras da spec, iguais para os três degraus:
 - **Split por conversa, nunca por mensagem.** Mensagens da mesma sessão vazam informação. Com
   o dataset público cada conversa tem uma mensagem só, então a regra não muda nada *aqui* — mas
   precisa estar no código *antes* de entrar conversa real, não depois.
-- **20% teste, seed 42.** Determinístico: `random.Random(42).shuffle` sobre IDs ordenados.
-  Resultado: **50.456 treino / 12.615 teste**.
-- **Mesmo conjunto de teste para todos.** `treinar_bertimbau` e `avaliar` usam a mesma
-  `dividir_por_conversa` com a mesma seed. É pré-condição do McNemar — `mcnemar()` levanta
+- **20% teste, seed 42, congelado.** Gerado uma vez com `random.Random(42).shuffle` sobre IDs
+  ordenados e gravado em `models/splits/polaridade.json` (chave `fonte:origem_id`, versionado).
+  Resultado: **50.456 treino / 12.615 teste** (suporte 4.689 / 4.785 / 3.141), mais as 2
+  mensagens da conversa `amostra`, no treino. Conversa rotulada depois vai para o treino, nunca
+  para o teste. Apagar o arquivo regera o split e invalida a comparação com métricas antigas.
+- **Mesmo conjunto de teste para todos.** `treinar_bertimbau` e `avaliar` leem o mesmo
+  arquivo via `split_congelado`; `--fonte b2w olist` filtra dentro dele. É pré-condição do McNemar — `mcnemar()` levanta
   `ValueError` se os `y_true` diferirem.
 - **F1 macro é a métrica principal.** Acurácia não conta: base desbalanceada em neutro.
 - **Matriz sempre na ordem `positivo, negativo, neutro`**, linhas = verdadeiro.
@@ -272,4 +275,6 @@ uv run manage.py treinar_bertimbau --epocas 1 --batch 32
 uv run manage.py avaliar --modelos lexico classico bertimbau --salvar
 ```
 
-`--seed` precisa casar entre `treinar_bertimbau` e `avaliar` (padrão 42 nos dois).
+O split vem de `models/splits/polaridade.json`; não há mais `--seed` nos dois comandos.
+`models/bertimbau/` só conta como treinado se tiver `config.json` **e** `model.safetensors`;
+sem os pesos, `prever` levanta `RuntimeError` em vez de classificar com a cabeça aleatória.

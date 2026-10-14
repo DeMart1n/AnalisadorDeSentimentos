@@ -235,7 +235,7 @@ class AnonimizadorTest(TestCase):
         self.assertIn("[NOME]", msgs[2])
 
 
-from .avaliacao import avaliar, dividir_por_conversa, mcnemar
+from .avaliacao import avaliar, dividir_por_conversa, mcnemar, split_congelado
 from .modelos import carregar
 from .models import NEGATIVO, NEUTRO, POSITIVO
 
@@ -272,6 +272,28 @@ class AvaliacaoTest(TestCase):
         self.assertIn("f1_macro", r)
         self.assertEqual(len(r["matriz"]), 3)
         self.assertEqual(len(r["y_pred"]), len(teste))
+
+    def test_split_congelado_nao_muda_com_conversa_nova(self):
+        import tempfile
+        from pathlib import Path
+
+        from .avaliacao import carregar_dados
+        from .models import USUARIO, Conversa, Mensagem
+
+        def nova(origem):
+            c = Conversa.objects.create(fonte="t", origem_id=origem)
+            Mensagem.objects.create(conversa=c, ordem=0, autor=USUARIO, texto=origem, rotulo_real=POSITIVO)
+
+        for i in range(10):
+            nova(str(i))
+        with tempfile.TemporaryDirectory() as d:
+            arquivo = Path(d) / "split.json"
+            _, teste_antes = split_congelado(carregar_dados(), arquivo)
+            for i in range(10, 30):
+                nova(str(i))
+            treino, teste = split_congelado(carregar_dados(), arquivo)
+        self.assertEqual(teste, teste_antes)
+        self.assertEqual(len(treino) + len(teste), 30)
 
     def test_mcnemar_exige_mesmo_conjunto_de_teste(self):
         a = {"y_true": [POSITIVO], "y_pred": [POSITIVO]}
@@ -314,6 +336,19 @@ class EscadaTest(TestCase):
             self.assertTrue(callable(getattr(classe, "treinar")))
             self.assertTrue(callable(getattr(classe, "prever")))
             self.assertTrue(hasattr(classe, "nome"))
+
+    def test_config_sem_pesos_nao_conta_como_treinado(self):
+        import tempfile
+        from pathlib import Path
+
+        from .modelos.bertimbau import pesos_salvos
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "config.json").write_text("{}")
+            self.assertFalse(pesos_salvos(d))
+            (d / "model.safetensors").write_bytes(b"")
+            self.assertTrue(pesos_salvos(d))
 
 
 from unittest.mock import patch
@@ -543,3 +578,139 @@ class ApiTest(TestCase):
         self.assertIn("text/html", r.headers.get("Content-Type", ""))
         self.assertIn("@scalar/api-reference", r.content.decode("utf-8"))
         self.assertIn("/api/openapi.yaml", r.content.decode("utf-8"))
+
+
+class RotuloEmocaoTest(TestCase):
+    def test_reimportar_nao_apaga_anotacao_humana(self):
+        from django.db.models import ProtectedError
+
+        from .models import HUMANO, RotuloEmocao
+
+        csv_ = "conversa_id,ordem,autor,texto\nc1,1,usuario,adorei esperar 40 min\n"
+        importar(csv_, fonte="chat")
+        m = Mensagem.objects.get()
+        r = RotuloEmocao.objects.create(mensagem=m, origem=HUMANO, anotador="a1", raiva=True)
+        self.assertEqual(r.emocoes, ["raiva"])
+        with self.assertRaises(ProtectedError):
+            importar(csv_, fonte="chat")
+        self.assertTrue(RotuloEmocao.objects.exists())
+
+    def test_importar_brighter_idempotente(self):
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+
+        from .models import RotuloEmocao
+
+        cab = "id,text,anger,disgust,fear,joy,sadness,surprise\n"
+        with tempfile.TemporaryDirectory() as d:
+            for s in ["train", "dev", "test"]:
+                Path(d, f"{s}.csv").write_text(cab + f"ptbr_{s}_track_b_1,adorei esperar 40 min,2,0,0,0,1,0\n")
+            call_command("importar_brighter", dir=Path(d), stdout=open("/dev/null", "w"))
+            call_command("importar_brighter", dir=Path(d), stdout=open("/dev/null", "w"))
+        self.assertEqual(RotuloEmocao.objects.count(), 3)
+        r = RotuloEmocao.objects.first()
+        self.assertEqual(r.emocoes, ["raiva", "tristeza"])
+        self.assertEqual(r.intensidades["raiva"], 2)
+
+    def test_ciclo_de_anotacao(self):
+        import csv
+        import io
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+
+        from .models import RotuloEmocao
+
+        csv_ = ("conversa_id,ordem,autor,texto\n"
+                "c1,1,atendente,posso ajudar?\nc1,2,usuario,adorei esperar 40 min\n"
+                "c1,3,usuario,ok\nc2,1,usuario,qual o prazo?\n")
+        importar(csv_, fonte="chat")
+        with tempfile.TemporaryDirectory() as d:
+            arq = Path(d) / "a.csv"
+            call_command("anotacao", "exportar", str(arq), fontes=["chat"], n=10, stdout=io.StringIO())
+            linhas = list(csv.DictReader(arq.open()))
+            self.assertEqual(len(linhas), 3)  # só cliente
+            primeira = next(l for l in linhas if l["texto"] == "adorei esperar 40 min")
+            self.assertEqual(primeira["anterior"], "posso ajudar?")
+
+            def anotar(nome, marca):
+                for l in linhas:
+                    l.update({"raiva": "1"} if l["texto"] == "adorei esperar 40 min" else {"neutro": marca})
+                with arq.open("w") as f:
+                    w = csv.DictWriter(f, fieldnames=linhas[0].keys())
+                    w.writeheader()
+                    w.writerows(linhas)
+                call_command("anotacao", "importar", str(arq), anotador=nome, stdout=io.StringIO())
+
+            anotar("a", "1")
+            anotar("b", "")  # b deixou as neutras em branco: puladas
+            self.assertEqual(RotuloEmocao.objects.filter(anotador="a").count(), 3)
+            self.assertEqual(RotuloEmocao.objects.filter(anotador="b").count(), 1)
+            out = io.StringIO()
+            call_command("anotacao", "kappa", "a", "b", stdout=out)
+            self.assertIn("1 mensagens em comum", out.getvalue())
+
+            linhas[0].update({"neutro": "1", "raiva": "1"})
+            with arq.open("w") as f:
+                w = csv.DictWriter(f, fieldnames=linhas[0].keys())
+                w.writeheader()
+                w.writerows(linhas)
+            with self.assertRaises(CommandError):
+                call_command("anotacao", "importar", str(arq), anotador="c", stdout=io.StringIO())
+
+    def test_importar_goemotions(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+
+        from .models import RotuloEmocao
+
+        with tempfile.TemporaryDirectory() as d:
+            arq = Path(d) / "t.jsonl"
+            arq.write_text(json.dumps({"id": "e1", "split": "dev", "texto": "x", "ekman": ["anger", "fear"],
+                                       "original": [], "texto_pt": "[NAME] me assustou, que raiva"}) + "\n")
+            call_command("importar_goemotions", arquivo=arq, stdout=open("/dev/null", "w"))
+        r = RotuloEmocao.objects.get()
+        self.assertEqual(r.emocoes, ["raiva", "medo"])
+        self.assertEqual(r.mensagem.conversa.origem_id, "dev_e1")
+        self.assertTrue(r.mensagem.texto.startswith("[NOME]"))
+
+
+class EmocoesTest(TestCase):
+    def test_limiar_maximiza_f1_por_emocao(self):
+        from .modelos.emocoes import ajustar_limiares
+
+        # emoção 0 separa em 0.3; emoção 1 nunca aparece -> 0.5
+        probs = [[0.9, 0.1], [0.35, 0.2], [0.2, 0.1], [0.1, 0.3]]
+        y = [[1, 0], [1, 0], [0, 0], [0, 0]]
+        self.assertEqual(ajustar_limiares(probs, y), [0.25, 0.5])
+
+    def test_metricas_por_emocao_e_ic(self):
+        from .avaliacao_emocoes import metricas
+
+        y = [[1, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], [0] * 6, [1, 1, 0, 0, 0, 0]]
+        m = metricas(y, y, n_boot=50)
+        self.assertEqual(m["por_emocao"]["alegria"]["f1"], 1.0)
+        self.assertEqual(m["por_emocao"]["alegria"]["suporte"], 2)
+        self.assertEqual(m["neutro_suporte"], 1)
+        lo, hi = m["por_emocao"]["raiva"]["ic95"]
+        self.assertLessEqual(lo, 1.0)
+        self.assertEqual(hi, 1.0)
+
+    def test_split_usa_original_e_recusa_fonte_sem_split(self):
+        from .avaliacao_emocoes import split_emocoes
+
+        dados = [{"fonte": "brighter_ptbr", "origem_id": "ptbr_dev_track_b_00001"},
+                 {"fonte": "goemotions_pt", "origem_id": "test_abc"},
+                 {"fonte": "goemotions_pt", "origem_id": "train_x_y"}]
+        partes = split_emocoes(dados)
+        self.assertEqual({k: len(v) for k, v in partes.items()},
+                         {"validacao": 1, "teste_goemotions_pt": 1, "treino": 1})
+        with self.assertRaises(ValueError):
+            split_emocoes([{"fonte": "chat", "origem_id": "c1"}])

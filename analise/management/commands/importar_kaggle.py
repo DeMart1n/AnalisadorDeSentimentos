@@ -49,7 +49,15 @@ class Command(BaseCommand):
                 texto = (linha.get("review_text") or "").strip()
                 if not texto or not linha.get("rating"):
                     continue
-                por_rotulo[_rotulo(linha["rating"])].append((f"{fonte}-{i}", texto))
+                try:
+                    rotulo = _rotulo(linha["rating"])
+                except ValueError:
+                    continue
+                por_rotulo[rotulo].append((f"{fonte}-{i}", texto))
+
+        if not any(por_rotulo.values()):
+            # o delete abaixo apagaria a base atual para gravar nada
+            raise CommandError(f"nenhuma review válida em {arquivo} (colunas review_text e rating) — nada foi alterado")
 
         rng = random.Random(seed)
         amostra = []

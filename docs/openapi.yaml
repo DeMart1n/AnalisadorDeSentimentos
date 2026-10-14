@@ -280,6 +280,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 erro: "Nenhuma conversa encontrada para os critérios informados."
+        '503':
+          description: Modelo sem pesos treinados no servidor (rode manage.py treinar_bertimbau)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /conversas:
     get:

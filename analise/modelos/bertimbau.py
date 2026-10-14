@@ -12,10 +12,17 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from analise.models import NEGATIVO, NEUTRO, POSITIVO
 
+from . import ModeloNaoTreinado
+
 BASE = "neuralmind/bert-base-portuguese-cased"
 DESTINO = Path(__file__).resolve().parents[2] / "models" / "bertimbau"
 CLASSES = [POSITIVO, NEGATIVO, NEUTRO]
 MAX_LEN = 128  # ponytail: cobre a maioria dos reviews; subir se o truncamento doer
+
+
+def pesos_salvos(destino):
+    """Só config.json não basta: sem os pesos o load quebra com OSError."""
+    return (destino / "config.json").exists() and (destino / "model.safetensors").exists()
 
 
 def dispositivo():
@@ -44,7 +51,7 @@ class Bertimbau:
     def __init__(self, destino=DESTINO, epocas=2, batch=32, lr=2e-5):
         self.destino, self.epocas, self.batch, self.lr = Path(destino), epocas, batch, lr
         self.device = dispositivo()
-        self.treinado = (self.destino / "config.json").exists()
+        self.treinado = pesos_salvos(self.destino)
         origem = self.destino if self.treinado else BASE
         self.tokenizer = AutoTokenizer.from_pretrained(origem)
         self.modelo = AutoModelForSequenceClassification.from_pretrained(
@@ -89,6 +96,9 @@ class Bertimbau:
 
     @torch.no_grad()
     def prever(self, textos, batch=64):
+        if not self.treinado:
+            # sem isso a cabeça aleatória do BASE classificaria em silêncio
+            raise ModeloNaoTreinado(f"sem pesos em {self.destino} — rode manage.py treinar_bertimbau")
         self.modelo.eval()
         loader = DataLoader(_Dados(list(textos), None, self.tokenizer), batch_size=batch)
         rotulos, scores = [], []

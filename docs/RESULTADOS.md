@@ -134,4 +134,4 @@ uv run manage.py avaliar --modelos lexico classico bertimbau --salvar
 ```
 
 Sobrescreve `models/metricas.json`, que é servido por `GET /api/metricas`. Sem `--salvar`, só
-imprime. `--seed` precisa casar com a usada em `treinar_bertimbau` (padrão 42 nos dois).
+imprime. O teste vem de `models/splits/polaridade.json`, o mesmo de `treinar_bertimbau`.
