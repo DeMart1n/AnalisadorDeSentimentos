@@ -24,22 +24,43 @@
     },
     {
       "nome": "classico",
-      "f1_macro": 0.7346,
+      "f1_macro": 0.7345,
       "matriz": [
         [
-          3645,
+          3644,
           163,
-          881
+          882
         ],
         [
-          87,
-          4097,
-          601
+          88,
+          4094,
+          603
         ],
         [
           674,
-          673,
-          1794
+          671,
+          1796
+        ]
+      ]
+    },
+    {
+      "nome": "bertimbau",
+      "f1_macro": 0.7683,
+      "matriz": [
+        [
+          3799,
+          111,
+          779
+        ],
+        [
+          50,
+          4246,
+          489
+        ],
+        [
+          602,
+          629,
+          1910
         ]
       ]
     }
@@ -49,8 +70,24 @@
       "a": "lexico",
       "b": "classico",
       "acertos_so_de_a": 1343,
-      "acertos_so_de_b": 4584,
+      "acertos_so_de_b": 4582,
       "p": 0.0,
+      "significativo": true
+    },
+    {
+      "a": "lexico",
+      "b": "bertimbau",
+      "acertos_so_de_a": 1139,
+      "acertos_so_de_b": 4799,
+      "p": 0.0,
+      "significativo": true
+    },
+    {
+      "a": "classico",
+      "b": "bertimbau",
+      "acertos_so_de_a": 603,
+      "acertos_so_de_b": 1024,
+      "p": 1.1712080933401235e-25,
       "significativo": true
     }
   ]
