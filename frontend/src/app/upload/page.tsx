@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import { AppLayout } from '@/components/AppLayout';
 import { useAuth } from '@/lib/auth';
 import { api, UploadResponse, AnalisarResponse } from '@/lib/api';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -13,11 +13,13 @@ export default function UploadPage() {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  const queryClient = useQueryClient();
   
   const [file, setFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<UploadResponse | null>(null);
   
+  const [selectedModel, setSelectedModel] = useState<'bertimbau' | 'lexico'>('lexico');
   const [analysisSuccess, setAnalysisSuccess] = useState<AnalisarResponse | null>(null);
 
   const uploadMutation = useMutation({
@@ -32,6 +34,8 @@ export default function UploadPage() {
     onSuccess: (data) => {
       setUploadSuccess(data);
       setUploadError(null);
+      queryClient.invalidateQueries({ queryKey: ['metricas'] });
+      queryClient.invalidateQueries({ queryKey: ['conversas'] });
     },
     onError: (error: unknown) => {
       setUploadSuccess(null);
@@ -44,20 +48,26 @@ export default function UploadPage() {
   });
 
   const analisarMutation = useMutation({
-    mutationFn: async (fonte: string) => {
-      // Trigger the classification using the ML endpoint
+    mutationFn: async ({ fonte, modelo }: { fonte: string; modelo: 'bertimbau' | 'lexico' }) => {
       const res = await api.post<AnalisarResponse>('/conversas/analisar', { 
         fonte,
-        modelo: 'bertimbau',
-        apenas_nao_classificadas: true
+        modelo,
+        apenas_nao_classificadas: false
       });
       return res.data;
     },
     onSuccess: (data) => {
       setAnalysisSuccess(data);
+      setUploadError(null);
+      queryClient.invalidateQueries({ queryKey: ['metricas'] });
+      queryClient.invalidateQueries({ queryKey: ['conversas'] });
     },
-    onError: () => {
-      setUploadError('Erro ao disparar a classificação via IA. Tente novamente.');
+    onError: (error: unknown) => {
+      if (axios.isAxiosError(error) && error.response?.data) {
+        setUploadError(error.response.data.erro || 'Erro ao disparar a classificação via IA.');
+      } else {
+        setUploadError('Erro ao disparar a classificação via IA. Tente novamente.');
+      }
     }
   });
 
@@ -86,7 +96,7 @@ export default function UploadPage() {
 
   const handleAnalyze = () => {
     if (uploadSuccess?.fonte) {
-      analisarMutation.mutate(uploadSuccess.fonte);
+      analisarMutation.mutate({ fonte: uploadSuccess.fonte, modelo: selectedModel });
     }
   };
 
@@ -203,22 +213,70 @@ export default function UploadPage() {
 
               {!analysisSuccess ? (
                 <div className="flex flex-col border-t border-outline-variant pt-6">
-                  <h3 className="font-semibold text-on-surface mb-2">Classificação Neural Pendente</h3>
-                  <p className="text-sm text-on-surface-variant mb-6">
-                    O motor <strong>BERTimbau</strong> será acionado para ler cada mensagem, processar o contexto e assinalar os sentimentos (Positivo, Negativo ou Neutro). Este processo pode demorar alguns minutos dependendo do volume de dados.
+                  <h3 className="font-semibold text-on-surface mb-2">Classificação por Inteligência Artificial</h3>
+                  <p className="text-sm text-on-surface-variant mb-4">
+                    Escolha o motor de classificação desejado para processar os sentimentos das mensagens deste lote:
                   </p>
+
+                  {/* Seletor de Modelo */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                    <label 
+                      onClick={() => setSelectedModel('lexico')}
+                      className={`cursor-pointer p-4 rounded-xl border transition-all flex flex-col gap-1 ${
+                        selectedModel === 'lexico' 
+                          ? 'border-[#4f46e5] bg-[#eef2ff]' 
+                          : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm text-on-surface">Léxico (Instantâneo)</span>
+                        <input type="radio" name="model" checked={selectedModel === 'lexico'} onChange={() => setSelectedModel('lexico')} className="accent-[#4f46e5]" />
+                      </div>
+                      <span className="text-xs text-outline">Piso comparativo baseado em dicionário. Executa em menos de 1 segundo.</span>
+                    </label>
+
+                    <label 
+                      onClick={() => setSelectedModel('bertimbau')}
+                      className={`cursor-pointer p-4 rounded-xl border transition-all flex flex-col gap-1 ${
+                        selectedModel === 'bertimbau' 
+                          ? 'border-[#4f46e5] bg-[#eef2ff]' 
+                          : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm text-on-surface">BERTimbau (Deep Learning)</span>
+                        <input type="radio" name="model" checked={selectedModel === 'bertimbau'} onChange={() => setSelectedModel('bertimbau')} className="accent-[#4f46e5]" />
+                      </div>
+                      <span className="text-xs text-outline">Modelo Transformer Neural (requer pesos treinados no servidor ou tempo em CPU).</span>
+                    </label>
+                  </div>
+
                   <button 
                     onClick={handleAnalyze}
                     disabled={analisarMutation.isPending}
                     className="w-full py-3 rounded-lg bg-[#4f46e5] text-white font-label-md font-semibold hover:bg-[#4338ca] transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-70"
                   >
                     {analisarMutation.isPending ? <span className="material-symbols-outlined animate-spin text-xl">sync</span> : <span className="material-symbols-outlined text-xl">psychology</span>}
-                    {analisarMutation.isPending ? 'Analisando via BERTimbau...' : 'Iniciar Classificação por IA'}
+                    {analisarMutation.isPending 
+                      ? (selectedModel === 'bertimbau' ? 'Processando BERTimbau (aguarde)...' : 'Classificando via Léxico...') 
+                      : `Executar Análise com ${selectedModel === 'bertimbau' ? 'BERTimbau' : 'Léxico'}`
+                    }
                   </button>
-                  {analisarMutation.isPending && (
+
+                  {analisarMutation.isPending && selectedModel === 'bertimbau' && (
                     <p className="text-center text-xs text-outline mt-3">
-                      Por favor, aguarde. O tempo médio é de ~50ms por mensagem...
+                      Por favor, aguarde. Inferência neural de 109M parâmetros em CPU pode levar de 1 a 3 minutos...
                     </p>
+                  )}
+
+                  {uploadError && (
+                    <div className="mt-4 p-4 bg-[#fff1f2] border border-[#fecdd3] text-[#9f1239] rounded-lg text-sm font-medium flex items-start gap-2">
+                      <span className="material-symbols-outlined text-[18px]">error</span>
+                      <div>
+                        <strong className="block font-semibold">Falha na classificação:</strong>
+                        <span>{uploadError}</span>
+                      </div>
+                    </div>
                   )}
                 </div>
               ) : (
