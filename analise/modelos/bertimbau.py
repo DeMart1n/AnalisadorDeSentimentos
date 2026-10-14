@@ -12,6 +12,8 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from analise.models import NEGATIVO, NEUTRO, POSITIVO
 
+from . import ModeloNaoTreinado
+
 BASE = "neuralmind/bert-base-portuguese-cased"
 DESTINO = Path(__file__).resolve().parents[2] / "models" / "bertimbau"
 CLASSES = [POSITIVO, NEGATIVO, NEUTRO]
@@ -96,7 +98,7 @@ class Bertimbau:
     def prever(self, textos, batch=64):
         if not self.treinado:
             # sem isso a cabeça aleatória do BASE classificaria em silêncio
-            raise RuntimeError(f"sem pesos em {self.destino} — rode manage.py treinar_bertimbau")
+            raise ModeloNaoTreinado(f"sem pesos em {self.destino} — rode manage.py treinar_bertimbau")
         self.modelo.eval()
         loader = DataLoader(_Dados(list(textos), None, self.tokenizer), batch_size=batch)
         rotulos, scores = [], []

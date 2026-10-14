@@ -21,8 +21,8 @@ class Command(BaseCommand):
         if not dados:
             raise CommandError("nenhuma mensagem de usuário rotulada no banco — importe uma base antes")
         treino, teste = split_congelado(dados)
-        if not teste:
-            raise CommandError("conjunto de teste vazio — poucas conversas rotuladas")
+        if not treino or not teste:
+            raise CommandError("treino ou teste vazio — poucas conversas rotuladas")
 
         resultados = []
         for nome in opts["modelos"]:

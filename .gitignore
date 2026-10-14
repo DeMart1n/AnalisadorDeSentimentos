@@ -21,3 +21,4 @@ models/bertimbau/
 .env
 # Pesos do classificador de emoções — manage.py treinar_emocoes
 models/emocoes/
+.coverage*

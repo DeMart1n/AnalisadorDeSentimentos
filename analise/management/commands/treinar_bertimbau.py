@@ -23,6 +23,8 @@ class Command(BaseCommand):
         treino, teste = split_congelado(dados)
         if opts["amostra"]:
             treino = treino[: opts["amostra"]]
+        if not treino:
+            raise CommandError("treino vazio — poucas conversas rotuladas")
 
         modelo = Bertimbau(epocas=opts["epocas"], batch=opts["batch"])
         self.stdout.write(f"dispositivo: {dispositivo()} | treino: {len(treino)} | teste reservado: {len(teste)}")

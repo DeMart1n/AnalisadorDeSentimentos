@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -16,7 +17,15 @@ class Command(BaseCommand):
         arquivo = opts["arquivo"]
         formato = "json" if arquivo.suffix.lower() == ".json" else "csv"
         try:
-            conversas, mensagens = importar(arquivo.read_text(encoding="utf-8"), opts["fonte"], formato)
+            conteudo = arquivo.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise CommandError(f"arquivo não encontrado: {arquivo}")
+        except UnicodeDecodeError:
+            raise CommandError("arquivo precisa estar em UTF-8")
+        try:
+            conversas, mensagens = importar(conteudo, opts["fonte"], formato)
+        except json.JSONDecodeError as e:
+            raise CommandError(f"JSON inválido: {e}")
         except ErroDeImportacao as e:
             for erro in e.erros[:20]:
                 self.stderr.write(erro)
