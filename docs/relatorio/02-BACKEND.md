@@ -21,7 +21,8 @@ Detalhes de design em [docs/ARQUITETURA.md](../ARQUITETURA.md); contratos em
 | `management/commands/` | 196 | `importar_kaggle`, `importar_conversas`, `treinar_bertimbau`, `avaliar` |
 | `AnalisadorDeSentimentos/` | 184 | settings, urls raiz, wsgi/asgi |
 
-Total: 1.167 linhas de Python. Sem DRF, sem Celery, sem fila, sem microserviço.
+Total: 1.167 linhas de Python. Sem DRF nem microserviço; a classificação roda em workers Celery
+com Redis como fila.
 
 ## Modelo de dados
 
@@ -83,9 +84,8 @@ Comportamento que importa:
 - **Ou entra tudo, ou nada.** `importar()` é `@transaction.atomic`. Qualquer erro de esquema
   aborta o arquivo inteiro. Um CSV meio importado é pior que um erro.
 - **Reimportar substitui.** Mesma `(fonte, origem_id)` → mensagens antigas apagadas e regravadas.
-- **Classificação síncrona dentro da request**, e ela **reclassifica todas as conversas da
-  `fonte`**, não só as do arquivo enviado. Enviar um arquivo com `fonte=b2w` dispararia a
-  classificação de 36.000 mensagens dentro de uma request HTTP.
+- **O upload só importa.** Classificar é `POST /api/conversas/analisar`, que enfileira lotes
+  de 50 conversas e responde 202 com `tarefa_id`; nenhuma inferência roda dentro da request.
 - 400 com `detalhes` (até 20 itens) na validação; 400 em não-UTF-8 e JSON malformado.
 
 ### `GET /api/conversas`
@@ -137,9 +137,11 @@ conversa real com CSAT ou anotação manual.
 
 ## Cache do modelo
 
-`classificador.modelo()` é `@lru_cache(maxsize=2)`, padrão `bertimbau`. Carregar o BERTimbau
-custa segundos e o processo atende várias requisições; `maxsize=2` permite alternar entre dois
-degraus sem recarregar nem segurar três modelos em RAM.
+`classificador.modelo()` é `@lru_cache(maxsize=2)`, padrão `bertimbau`, e vive no worker, não no
+processo web. Carregar o modelo custa segundos e cada worker atende muitos lotes; `maxsize=2`
+permite alternar entre dois degraus sem recarregar nem segurar três modelos em RAM. O
+`bertimbau` do worker é o `BertimbauOnnx` (int8, sem torch). `classificar_conversas` pagina por
+pk em lotes de 256 mensagens, então a memória não cresce com o tamanho da conversa.
 
 ## Comandos de gerenciamento
 
@@ -171,15 +173,18 @@ interface é estática. `docs/ARQUITETURA.md` diz "31 testes" — está desatual
 - **`@csrf_exempt` no upload.** App local, single-user, sem autenticação. Religar quando entrar
   auth ou dado real de empresa.
 - **`DEBUG = True` e `SECRET_KEY` de desenvolvimento.** Não é deploy.
-- **SQLite.** Postgres só quando houver dado real em volume.
+- **SQLite por padrão.** Com `DATABASE_HOST` definido vira Postgres (RDS); no SQLite, `timeout`
+  de 20 s para os workers esperarem o lock em vez de falhar.
 - **Sem paginação por cursor.** Corte em 500; cursor entra quando doer.
-- **Inferência síncrona na request.** Vira job se um upload grande travar — não antes.
+- **Inferência em fila, não na request.** Lotes de 50 conversas num `group` do Celery; workers
+  `--pool=solo` escalam com `docker compose up --scale worker=N`. 503 se não há
+  `model.int8.onnx` ou se o Redis está fora.
 
 ## Riscos e pendências do backend
 
 | # | Item | Gravidade |
 |---|---|---|
-| 1 | Upload reclassifica a `fonte` inteira dentro da request — `fonte=b2w` classificaria 36.000 mensagens sincronamente. É onde a decisão "vira job se travar" será cobrada. | alta |
+| 1 | ~~Upload reclassifica a `fonte` inteira dentro da request — `fonte=b2w` classificaria 36.000 mensagens sincronamente.~~ **Resolvido:** a classificação saiu do upload e roda em workers Celery, em lotes de 50 conversas, com status por `tarefa_id`. | ~~alta~~ resolvido |
 | 2 | Banco sem predições: `/api/metricas` serve dado vazio e a tela de dashboard não tem o que mostrar | alta |
 | 3 | `metricas.json` sem o BERTimbau — o comparativo servido pela API é incompleto | alta |
 | 4 | Sem CORS configurado; bloqueia o frontend Next | alta (quando o front começar) |

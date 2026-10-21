@@ -47,8 +47,17 @@ gerar os dois do zero, veja [docs/TREINAMENTO.md](docs/TREINAMENTO.md).
 ## Uso rápido
 
 ```bash
+uv run manage.py exportar_onnx   # uma vez por treino: gera models/bertimbau/model.int8.onnx
+redis-server &
 uv run manage.py runserver
+uv run celery -A AnalisadorDeSentimentos worker --pool=solo -l info   # 1 terminal por worker
 ```
+
+A classificação (`POST /api/conversas/analisar`) roda nos workers Celery, não no processo web.
+Cada worker é um processo com o BERTimbau int8 via ONNX Runtime (~330 MB, sem torch). Para ter
+mais vazão, suba mais workers (`docker compose up --scale worker=N`) e ajuste
+`ONNX_THREADS` ≈ núcleos ÷ workers. Com vários workers, use Postgres/RDS (`DATABASE_HOST`): o
+SQLite trava o arquivo inteiro a cada escrita.
 
 Acesse a documentação interativa em: **http://localhost:8000/api/docs** (Scalar) ou a especificação em **http://localhost:8000/api/openapi.yaml**.
 
@@ -66,6 +75,7 @@ curl http://localhost:8000/api/metricas
 | `manage.py importar_kaggle --dir <pasta> --bases b2w olist` | Converte o dataset público para o esquema do projeto |
 | `manage.py importar_conversas <arquivo> --fonte <nome>` | Importa CSV/JSON de conversas no esquema do projeto |
 | `manage.py treinar_bertimbau --epocas 2 --batch 32` | Fine-tune no conjunto de treino, salva em `models/bertimbau/` |
+| `manage.py exportar_onnx` | Exporta o BERTimbau treinado para `model.onnx` (fp32) e `model.int8.onnx` (usado pelos workers) |
 | `manage.py avaliar --modelos lexico classico bertimbau --salvar` | Avalia os degraus no mesmo teste e grava `models/metricas.json` |
 
 ## Testes
@@ -80,4 +90,5 @@ não é instanciado nos testes (baixaria pesos); a checagem de interface é est�
 ## Stack
 
 Python 3.12, Django 6.1, scikit-learn 1.9, PyTorch 2.13 (backend MPS no Apple Silicon),
-transformers 5.16, SQLite. Dependência de dev: `kagglehub` para baixar o dataset.
+transformers 5.16 (só treino), ONNX Runtime 1.31 (inferência), Celery 5.6 + Redis,
+SQLite local ou Postgres (RDS). Dependência de dev: `kagglehub` para baixar o dataset.

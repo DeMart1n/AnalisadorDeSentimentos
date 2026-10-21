@@ -7,9 +7,12 @@ from django.test import SimpleTestCase, TestCase
 from transformers import BertConfig, BertForSequenceClassification, BertTokenizerFast
 from transformers.utils.logging import disable_progress_bar
 
-from .classificador import classificar_conversas, modelo
+from django.core.management import call_command
+
+from .classificador import classificar_conversas, modelo, verificar
 from .modelos import REGISTRO, ModeloNaoTreinado, carregar
 from .modelos.bertimbau import CLASSES, Bertimbau, _Dados, dispositivo, pesos_salvos
+from .modelos.bertimbau_onnx import ARQUIVO_FP32, ARQUIVO_INT8, BertimbauOnnx
 from .modelos.classico import Classico
 from .modelos.lexico import Lexico
 from .models import ATENDENTE, NEGATIVO, NEUTRO, POSITIVO, USUARIO, Conversa, Mensagem
@@ -84,6 +87,27 @@ class BertimbauTest(SimpleTestCase):
         self.assertEqual(len(rotulos), 3)
         self.assertTrue(set(rotulos) <= set(CLASSES))
         self.assertTrue(all(0 <= s <= 1 for s in scores))
+
+    def test_onnx_exportado_preve_igual_ao_torch(self):
+        b = self._novo()
+        self._treinar(b)
+        with patch("analise.management.commands.exportar_onnx.DESTINO", self.destino):
+            call_command("exportar_onnx", stdout=open("/dev/null", "w"))
+        self.assertTrue((self.destino / ARQUIVO_INT8).exists())
+
+        textos = ["bom ótimo", "ruim", "pedido não gostei", "palavra desconhecida"]
+        esperado_rotulos, esperado_scores = b.prever(textos)
+        rotulos, scores = BertimbauOnnx(destino=self.destino, arquivo=ARQUIVO_FP32).prever(textos)
+        self.assertEqual(rotulos, esperado_rotulos)
+        for s, e in zip(scores, esperado_scores):
+            self.assertAlmostEqual(s, e, places=3)
+        # lote maior com padding dinâmico não pode mudar o resultado
+        self.assertEqual(BertimbauOnnx(destino=self.destino, arquivo=ARQUIVO_FP32).prever(textos, batch=4)[0], rotulos)
+
+    def test_onnx_sem_arquivo_exportado_levanta_erro(self):
+        self._treinar(self._novo())
+        with self.assertRaisesRegex(ModeloNaoTreinado, "exportar_onnx"):
+            BertimbauOnnx(destino=self.destino)
 
     def test_com_pesos_carrega_do_destino_e_nao_da_base(self):
         self._treinar(self._novo())
@@ -260,6 +284,30 @@ class ClassificadorTest(TestCase):
         modelo("classico")
         self.assertEqual(self.carregar.call_count, 2)
 
-    def test_padrao_e_bertimbau(self):
-        classificar_conversas([self.conversa.id])
-        self.carregar.assert_called_once_with("bertimbau")
+    def test_padrao_e_bertimbau_via_onnx(self):
+        # produção não usa o Bertimbau do torch: só o exportado
+        with patch("analise.modelos.bertimbau_onnx.BertimbauOnnx", return_value=self.falso) as onnx:
+            classificar_conversas([self.conversa.id])
+        onnx.assert_called_once_with()
+        self.carregar.assert_not_called()
+
+    def test_le_em_lotes_sem_repetir_nem_pular(self):
+        extra = [Mensagem.objects.create(conversa=self.conversa, ordem=10 + i, autor=USUARIO, texto=f"m{i}")
+                 for i in range(3)]
+        self.assertEqual(classificar_conversas([self.conversa.id], nome="lexico", lote=2), 5)
+        lotes = [c.args[0] for c in self.falso.prever.call_args_list]
+        self.assertEqual(lotes, [["bom", "ok"], ["m0", "m1"], ["m2"]])
+        self.assertTrue(all(m.rotulo_pred for m in Mensagem.objects.filter(pk__in=[e.pk for e in extra])))
+
+    def test_apenas_nao_classificadas_em_lotes(self):
+        # o filtro rotulo_pred__isnull muda conforme o lote grava: a paginação por pk não pode pular nada
+        for i in range(3):
+            Mensagem.objects.create(conversa=self.conversa, ordem=10 + i, autor=USUARIO, texto=f"m{i}")
+        self.assertEqual(classificar_conversas([self.conversa.id], nome="lexico",
+                                               apenas_nao_classificadas=True, lote=1), 4)
+
+    def test_verificar_exige_onnx_exportado(self):
+        with patch("analise.classificador.caminho_pesos", return_value=Path("/nao/existe.onnx")):
+            with self.assertRaisesRegex(ModeloNaoTreinado, "exportar_onnx"):
+                verificar("bertimbau")
+            verificar("lexico")  # os outros não dependem do arquivo

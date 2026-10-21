@@ -231,10 +231,11 @@ paths:
     post:
       tags:
         - Análise
-      summary: Classificar mensagens de conversas por IA
+      summary: Enfileirar a classificação de mensagens por IA
       description: |
-        Dispara a classificação de sentimento (`positivo`, `negativo`, `neutro`) nas mensagens enviadas por usuários.
-        A inferência pode ser executada por uma base inteira (`fonte`) ou por uma lista de `conversa_ids`.
+        Enfileira a classificação de sentimento (`positivo`, `negativo`, `neutro`) nas mensagens enviadas por usuários,
+        por base inteira (`fonte`) ou por lista de `conversa_ids`. As conversas viram lotes de 50, processados pelos
+        workers Celery. Acompanhe com `GET /conversas/analisar/{tarefa_id}`.
       operationId: analisarConversas
       security:
         - BearerAuth: []
@@ -249,16 +250,17 @@ paths:
               modelo: "lexico"
               apenas_nao_classificadas: true
       responses:
-        '200':
-          description: Inferência concluída com sucesso
+        '202':
+          description: Lotes enfileirados
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnalisarConversasOutput'
               example:
+                tarefa_id: "9bb7f697-f96b-449a-bea4-f7c4ec51a197"
                 fonte: "piloto"
                 total_conversas: 2
-                mensagens_classificadas: 4
+                lotes: 1
                 modelo_utilizado: "lexico"
         '400':
           description: Payload inválido ou modelo não suportado
@@ -281,7 +283,49 @@ paths:
               example:
                 erro: "Nenhuma conversa encontrada para os critérios informados."
         '503':
-          description: Modelo sem pesos treinados no servidor (rode manage.py treinar_bertimbau)
+          description: BERTimbau sem ONNX exportado (rode manage.py exportar_onnx) ou fila indisponível
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /conversas/analisar/{tarefa_id}:
+    get:
+      tags:
+        - Análise
+      summary: Progresso de uma classificação
+      operationId: statusAnalise
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tarefa_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Estado atual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusAnaliseOutput'
+              example:
+                tarefa_id: "9bb7f697-f96b-449a-bea4-f7c4ec51a197"
+                estado: "concluido"
+                lotes: 94
+                lotes_concluidos: 94
+                lotes_falhos: 0
+                mensagens_classificadas: 4652
+                erro: null
+        '401':
+          description: Não autorizado (Token ausente ou inválido)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Tarefa inexistente ou expirada (24 h)
           content:
             application/json:
               schema:
@@ -586,15 +630,38 @@ components:
     AnalisarConversasOutput:
       type: object
       properties:
+        tarefa_id:
+          type: string
         fonte:
           type: string
           nullable: true
         total_conversas:
           type: integer
-        mensagens_classificadas:
+        lotes:
           type: integer
         modelo_utilizado:
           type: string
+
+    StatusAnaliseOutput:
+      type: object
+      properties:
+        tarefa_id:
+          type: string
+        estado:
+          type: string
+          enum: [processando, concluido, erro]
+          description: "`erro` só depois que todos os lotes terminam; antes disso, falhas aparecem em `lotes_falhos`"
+        lotes:
+          type: integer
+        lotes_concluidos:
+          type: integer
+        lotes_falhos:
+          type: integer
+        mensagens_classificadas:
+          type: integer
+        erro:
+          type: string
+          nullable: true
 
     IndicadoresSessao:
       type: object

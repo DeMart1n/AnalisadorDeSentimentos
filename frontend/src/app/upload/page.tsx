@@ -3,10 +3,9 @@
 import { useState, useRef } from 'react';
 import { AppLayout } from '@/components/AppLayout';
 import { useAuth } from '@/lib/auth';
-import { api, UploadResponse, AnalisarResponse } from '@/lib/api';
-import { useMutation } from '@tanstack/react-query';
+import { api, UploadResponse, AnalisarResponse, StatusAnaliseResponse } from '@/lib/api';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 export default function UploadPage() {
@@ -19,6 +18,19 @@ export default function UploadPage() {
   const [uploadSuccess, setUploadSuccess] = useState<UploadResponse | null>(null);
   
   const [analysisSuccess, setAnalysisSuccess] = useState<AnalisarResponse | null>(null);
+
+  // a classificação roda nos workers: o POST só enfileira, o progresso vem do status
+  const statusQuery = useQuery({
+    queryKey: ['status-analise', analysisSuccess?.tarefa_id],
+    queryFn: async () =>
+      (await api.get<StatusAnaliseResponse>(`/conversas/analisar/${analysisSuccess!.tarefa_id}`)).data,
+    enabled: !!analysisSuccess,
+    // GET falhou (tarefa expirada, rede, Redis fora): para de consultar em vez de girar para sempre
+    refetchInterval: (query) =>
+      query.state.status !== 'error' && (query.state.data?.estado === 'processando' || !query.state.data) ? 2000 : false,
+    retry: false,
+  });
+  const status = statusQuery.data;
 
   const uploadMutation = useMutation({
     mutationFn: async (selectedFile: File) => {
@@ -60,6 +72,8 @@ export default function UploadPage() {
       setUploadError('Erro ao disparar a classificação via IA. Tente novamente.');
     }
   });
+  const analisando = analisarMutation.isPending ||
+    (!!analysisSuccess && !statusQuery.isError && status?.estado !== 'concluido' && status?.estado !== 'erro');
 
   if (user?.role !== 'ADMIN') {
     return (
@@ -201,7 +215,7 @@ export default function UploadPage() {
                 </div>
               </div>
 
-              {!analysisSuccess ? (
+              {status?.estado !== 'concluido' ? (
                 <div className="flex flex-col border-t border-outline-variant pt-6">
                   <h3 className="font-semibold text-on-surface mb-2">Classificação Neural Pendente</h3>
                   <p className="text-sm text-on-surface-variant mb-6">
@@ -209,15 +223,27 @@ export default function UploadPage() {
                   </p>
                   <button 
                     onClick={handleAnalyze}
-                    disabled={analisarMutation.isPending}
+                    disabled={analisando}
                     className="w-full py-3 rounded-lg bg-[#4f46e5] text-white font-label-md font-semibold hover:bg-[#4338ca] transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-70"
                   >
-                    {analisarMutation.isPending ? <span className="material-symbols-outlined animate-spin text-xl">sync</span> : <span className="material-symbols-outlined text-xl">psychology</span>}
-                    {analisarMutation.isPending ? 'Analisando via BERTimbau...' : 'Iniciar Classificação por IA'}
+                    {analisando ? <span className="material-symbols-outlined animate-spin text-xl">sync</span> : <span className="material-symbols-outlined text-xl">psychology</span>}
+                    {analisando ? 'Analisando via BERTimbau...' : 'Iniciar Classificação por IA'}
                   </button>
-                  {analisarMutation.isPending && (
+                  {analisando && (
                     <p className="text-center text-xs text-outline mt-3">
-                      Por favor, aguarde. O tempo médio é de ~50ms por mensagem...
+                      {status
+                        ? `${status.lotes_concluidos} de ${status.lotes} lotes · ${status.mensagens_classificadas} mensagens classificadas`
+                        : 'Enviando para a fila de classificação...'}
+                    </p>
+                  )}
+                  {status?.estado === 'erro' && (
+                    <p className="text-center text-xs text-red-700 mt-3">
+                      A classificação falhou: {status.erro}. Tente novamente.
+                    </p>
+                  )}
+                  {statusQuery.isError && (
+                    <p className="text-center text-xs text-red-700 mt-3">
+                      Não foi possível consultar o progresso da classificação. Tente novamente.
                     </p>
                   )}
                 </div>
@@ -227,7 +253,7 @@ export default function UploadPage() {
                     <span className="material-symbols-outlined text-3xl text-[#10b981] mb-2">auto_awesome</span>
                     <h3 className="font-semibold text-[#065f46] text-lg">Classificação Finalizada!</h3>
                     <p className="text-sm text-[#047857] mt-1 mb-4">
-                      Todas as {analysisSuccess.mensagens_classificadas} mensagens foram classificadas com sucesso.
+                      Todas as {status.mensagens_classificadas} mensagens foram classificadas com sucesso.
                     </p>
                     <div className="flex items-center gap-3 w-full">
                       <button 

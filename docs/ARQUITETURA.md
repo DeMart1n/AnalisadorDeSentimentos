@@ -17,8 +17,11 @@ Django  ──  analise/views.py      (4 endpoints)
             SQLite  +  models/bertimbau/ (pesos em disco)
 ```
 
-Um único app Django (`analise`). Sem Celery, sem fila, sem microserviço: a inferência acontece
-de forma síncrona dentro da request. Se um upload grande travar, aí sim vira job — não antes.
+Um único app Django (`analise`). A inferência saiu da request: `POST /api/conversas/analisar`
+divide as conversas em lotes de 50 (`LOTE_CONVERSAS`), enfileira um `group` do Celery
+(`analise/tasks.py: classificar_lote`) e responde 202 com `tarefa_id`; o progresso sai de
+`GET /api/conversas/analisar/<tarefa_id>`. Os workers (Redis como broker, `--pool=solo`, escala
+com `docker compose up --scale worker=N`) rodam o BERTimbau int8 via ONNX Runtime, sem torch.
 
 ## Estrutura de arquivos
 
@@ -83,14 +86,17 @@ prever(textos) -> (rotulos, scores)
 nome: str
 ```
 
-`carregar(nome)` resolve pelo `REGISTRO`. O `bertimbau` tem import tardio: `torch` demora
-segundos a carregar e nem todo comando precisa dele.
+`carregar(nome)` resolve pelo `REGISTRO`. O `classico` e o `bertimbau` têm import tardio:
+`sklearn` e `torch` pesam centenas de MB e o processo web não usa nenhum dos dois.
 
 ## Cache do modelo
 
-`classificador.modelo()` é `@lru_cache(maxsize=2)`. Carregar o BERTimbau custa segundos; o
-processo do Django atende várias requisições. `maxsize=2` permite alternar entre dois degraus
-sem recarregar, sem segurar três modelos em memória.
+`classificador.modelo()` é `@lru_cache(maxsize=2)` e vive no processo do worker, não no web.
+Carregar o BERTimbau custa segundos e cada worker atende muitos lotes; `maxsize=2` permite
+alternar entre dois degraus sem recarregar, sem segurar três modelos em memória. Para
+`bertimbau` o cache guarda o `BertimbauOnnx` (`model.int8.onnx`, gerado por
+`manage.py exportar_onnx`; `BERTIMBAU_ONNX` troca o arquivo e `ONNX_THREADS` limita os núcleos
+por worker).
 
 ## Indicadores de sessão
 

@@ -1,21 +1,51 @@
+x-app: &app
+  build:
+    context: .
+    dockerfile: .docker/Dockerfile
+  environment:
+    - DEBUG=True
+    - DJANGO_ALLOWED_HOSTS=*
+    - DATABASE_PATH=/app/data/db.sqlite3
+    - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    - CELERY_BROKER_URL=redis://redis:6379/0
+    # RDS: defina DATABASE_HOST/NAME/USER/PASSWORD e o SQLite deixa de ser usado
+    - DATABASE_HOST=${DATABASE_HOST:-}
+    - DATABASE_NAME=${DATABASE_NAME:-analisador}
+    - DATABASE_USER=${DATABASE_USER:-postgres}
+    - DATABASE_PASSWORD=${DATABASE_PASSWORD:-}
+  restart: unless-stopped
+  volumes:
+    - ./analise:/app/analise
+    - ./AnalisadorDeSentimentos:/app/AnalisadorDeSentimentos
+    - ./manage.py:/app/manage.py
+    - ./data:/app/data
+    - ./models:/app/models
+    - ./docs:/app/docs
+  depends_on:
+    - redis
+
 services:
   api:
-    build:
-      context: .
-      dockerfile: .docker/Dockerfile
+    <<: *app
     container_name: analisador_sentimentos_api
     ports:
       - "8000:8000"
+
+  # escala com: docker compose up --scale worker=N
+  # pool solo = um processo por container: carrega o modelo uma vez (~400 MB), sem processo pai extra
+  worker:
+    <<: *app
+    command: celery -A AnalisadorDeSentimentos worker --pool=solo -l info
     environment:
-      - DEBUG=True
-      - DJANGO_ALLOWED_HOSTS=*
-      - DATABASE_PATH=/app/data/db.sqlite3
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - DATABASE_PATH=/app/data/db.sqlite3
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - DATABASE_HOST=${DATABASE_HOST:-}
+      - DATABASE_NAME=${DATABASE_NAME:-analisador}
+      - DATABASE_USER=${DATABASE_USER:-postgres}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-}
+      - ONNX_THREADS=${ONNX_THREADS:-2}  # núcleos da máquina / número de workers
+
+  redis:
+    image: redis:7.4-alpine
     restart: unless-stopped
-    volumes:
-      - ./analise:/app/analise
-      - ./AnalisadorDeSentimentos:/app/AnalisadorDeSentimentos
-      - ./manage.py:/app/manage.py
-      - ./data:/app/data
-      - ./models:/app/models
-      - ./docs:/app/docs

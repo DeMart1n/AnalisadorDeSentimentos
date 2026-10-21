@@ -46,6 +46,9 @@ class ApiAnaliseTest(TestCase):
             "/api/conversas/analisar", dados, content_type="application/json", **self.user_headers
         )
 
+    def _status(self, tarefa_id):
+        return self.client.get(f"/api/conversas/analisar/{tarefa_id}", **self.user_headers)
+
     # upload
 
     def test_upload_recusa_arquivo_fora_de_utf8(self):
@@ -143,10 +146,21 @@ class ApiAnaliseTest(TestCase):
     # analisar
 
     def test_analisar_sem_modelo_treinado_devolve_503(self):
-        with patch("analise.views.classificar_conversas", side_effect=ModeloNaoTreinado("sem pesos salvos")):
+        with patch("analise.views.verificar", side_effect=ModeloNaoTreinado("sem pesos salvos")), \
+             patch("analise.views.group") as fila:
             r = self._analisar({"fonte": "teste", "modelo": "bertimbau"})
         self.assertEqual(r.status_code, 503)
         self.assertEqual(r.json(), {"erro": "sem pesos salvos"})
+        fila.assert_not_called()  # nada vai para a fila se o worker não teria como classificar
+
+    def test_analisar_com_fila_fora_do_ar_devolve_503(self):
+        from kombu.exceptions import OperationalError
+
+        with patch("analise.views.group") as fila:
+            fila.return_value.apply_async.side_effect = OperationalError("redis caiu")
+            r = self._analisar({"fonte": "teste", "modelo": "lexico"})
+        self.assertEqual(r.status_code, 503)
+        self.assertIn("indisponível", r.json()["erro"])
 
     def test_analisar_corpo_vazio(self):
         r = self._analisar("")
@@ -165,13 +179,15 @@ class ApiAnaliseTest(TestCase):
 
     def test_analisar_filtra_por_conversa_ids(self):
         c2 = Conversa.objects.get(origem_id="c2", fonte="teste")
-        with patch("analise.views.classificar_conversas", return_value=1) as classificar:
+        with patch("analise.tasks.classificar_conversas", return_value=1) as classificar:
             r = self._analisar({"conversa_ids": [c2.id], "modelo": "lexico", "apenas_nao_classificadas": False})
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json(), {
-            "fonte": None, "total_conversas": 1, "mensagens_classificadas": 1, "modelo_utilizado": "lexico",
+        self.assertEqual(r.status_code, 202)
+        corpo = r.json()
+        self.assertEqual({k: v for k, v in corpo.items() if k != "tarefa_id"}, {
+            "fonte": None, "total_conversas": 1, "lotes": 1, "modelo_utilizado": "lexico",
         })
-        classificar.assert_called_once_with(ids=[c2.id], nome="lexico", apenas_nao_classificadas=False)
+        classificar.assert_called_once_with([c2.id], nome="lexico", apenas_nao_classificadas=False)
+        self.assertEqual(self._status(corpo["tarefa_id"]).json()["mensagens_classificadas"], 1)
 
     def test_analisar_fonte_e_ids_combinados_sem_intersecao_da_404(self):
         importar(CSV, fonte="outra")
@@ -184,8 +200,41 @@ class ApiAnaliseTest(TestCase):
         with patch("analise.classificador.modelo") as m:
             m.return_value.prever.side_effect = lambda textos: (["neutro"] * len(textos), [0.5] * len(textos))
             r = self._analisar({"fonte": "teste", "modelo": "lexico"})
-        self.assertEqual(r.json()["mensagens_classificadas"], 1)
+        self.assertEqual(self._status(r.json()["tarefa_id"]).json()["mensagens_classificadas"], 1)
         self.assertEqual(Mensagem.objects.get(texto="demorou demais").rotulo_pred, NEGATIVO)
+
+    def test_analisar_divide_em_lotes_de_conversas(self):
+        for i in range(3, 8):
+            importar(f"conversa_id,ordem,autor,texto\nc{i},1,usuario,mensagem {i}\n", fonte="teste")
+        with patch("analise.views.LOTE_CONVERSAS", 2), \
+             patch("analise.tasks.classificar_conversas", side_effect=lambda ids, **kw: len(ids)) as classificar:
+            r = self._analisar({"fonte": "teste", "modelo": "lexico"})
+        self.assertEqual((r.json()["total_conversas"], r.json()["lotes"]), (7, 4))
+        self.assertEqual([len(c.args[0]) for c in classificar.call_args_list], [2, 2, 2, 1])
+        status = self._status(r.json()["tarefa_id"]).json()
+        self.assertEqual(status["estado"], "concluido")
+        self.assertEqual((status["lotes"], status["lotes_concluidos"], status["mensagens_classificadas"]), (4, 4, 7))
+
+    def test_status_reporta_erro_do_worker(self):
+        with patch("analise.tasks.classificar_conversas", side_effect=RuntimeError("worker sem memória")):
+            r = self._analisar({"fonte": "teste", "modelo": "lexico"})
+        status = self._status(r.json()["tarefa_id"]).json()
+        self.assertEqual(status["estado"], "erro")
+        self.assertEqual(status["erro"], "worker sem memória")
+
+    def test_status_com_falha_e_lotes_pendentes_segue_processando(self):
+        # "erro" antes de todos terminarem faria o cliente reenfileirar lotes que ainda rodam
+        falho = MagicMock(**{"failed.return_value": True, "successful.return_value": False})
+        pendente = MagicMock(**{"failed.return_value": False, "successful.return_value": False})
+        with patch("analise.views.GroupResult.restore", return_value=MagicMock(id="g", results=[falho, pendente])):
+            status = self._status("g").json()
+        self.assertEqual((status["estado"], status["lotes_falhos"]), ("processando", 1))
+
+    def test_status_de_tarefa_inexistente_da_404(self):
+        self.assertEqual(self._status("nao-existe").status_code, 404)
+
+    def test_status_exige_token(self):
+        self.assertEqual(self.client.get("/api/conversas/analisar/qualquer").status_code, 401)
 
     def test_analisar_so_aceita_post(self):
         self.assertEqual(self.client.get("/api/conversas/analisar", **self.user_headers).status_code, 405)

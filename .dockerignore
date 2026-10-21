@@ -11,3 +11,6 @@ venv/
 .idea
 .vscode
 *.sqlite3-journal
+# pesos e banco entram por volume no compose
+models/
+data/

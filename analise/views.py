@@ -1,12 +1,17 @@
 import json
+from itertools import batched
 from pathlib import Path
+
+from celery import group
+from celery.result import GroupResult
+from kombu.exceptions import OperationalError
 
 from django.db.models import Count
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .classificador import classificar_conversas
+from .classificador import verificar
 from .importacao import ErroDeImportacao, importar
 from .indicadores import indicadores
 from .modelos import ModeloNaoTreinado
@@ -17,9 +22,11 @@ from .dtos.user.refresh_token_dto import RefreshTokenDTO, RefreshTokenOutputDTO
 from .dtos.analise_dto import AnalisarConversasDTO, AnalisarConversasOutputDTO
 from django.contrib.auth.hashers import make_password, check_password
 from .auth import token_generator, decode_refresh_token, jwt_required, admin_required
+from .tasks import classificar_lote
 
 METRICAS = Path(__file__).resolve().parents[1] / "models" / "metricas.json"
 OPENAPI_PATH = Path(__file__).resolve().parents[1] / "docs" / "openapi.yaml"
+LOTE_CONVERSAS = 50  # conversas por tarefa: unidade que os workers dividem entre si
 
 @csrf_exempt
 @require_POST
@@ -136,30 +143,60 @@ def analisar(request):
         if dto.conversa_ids:
             qs = qs.filter(id__in=dto.conversa_ids)
 
-        ids = list(qs.values_list("id", flat=True))
-        if not ids:
+        verificar(dto.modelo)
+        # só ids trafegam: o texto das mensagens é lido pelo worker, lote a lote
+        ids = qs.order_by("id").values_list("id", flat=True).iterator(chunk_size=2000)
+        lotes = [list(lote) for lote in batched(ids, LOTE_CONVERSAS)]
+        if not lotes:
             return JsonResponse({"erro": "Nenhuma conversa encontrada para os critérios informados."}, status=404)
 
-        classificadas = classificar_conversas(
-            ids=ids,
-            nome=dto.modelo,
-            apenas_nao_classificadas=dto.apenas_nao_classificadas,
-        )
+        tarefa = group(
+            classificar_lote.s(lote, dto.modelo, dto.apenas_nao_classificadas) for lote in lotes
+        ).apply_async()
+        tarefa.save()  # sem isso GroupResult.restore não acha o grupo no status
 
         output = AnalisarConversasOutputDTO(
+            tarefa_id=tarefa.id,
             fonte=dto.fonte,
-            total_conversas=len(ids),
-            mensagens_classificadas=classificadas,
+            total_conversas=sum(map(len, lotes)),
+            lotes=len(lotes),
             modelo_utilizado=dto.modelo,
         )
-        return JsonResponse(output.to_dict(), status=200)
+        return JsonResponse(output.to_dict(), status=202)
 
     except ModeloNaoTreinado as e:
         return JsonResponse({"erro": str(e)}, status=503)
+    except OperationalError:
+        return JsonResponse({"erro": "Fila de classificação indisponível. Tente novamente em instantes."}, status=503)
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
     except ValueError as e:
         return JsonResponse({"erro": e.args[0]}, status=400)
+
+
+@require_GET
+@jwt_required
+def status_analise(request, tarefa_id):
+    tarefa = GroupResult.restore(tarefa_id)
+    if tarefa is None:
+        return JsonResponse({"erro": "tarefa não encontrada ou expirada"}, status=404)
+    falhas = [r for r in tarefa.results if r.failed()]
+    concluidos = [r for r in tarefa.results if r.successful()]
+    if len(falhas) + len(concluidos) < len(tarefa.results):
+        estado = "processando"  # mesmo com falha: "erro" antes da hora faria o cliente reenfileirar lotes ainda rodando
+    elif falhas:
+        estado = "erro"
+    else:
+        estado = "concluido"
+    return JsonResponse({
+        "tarefa_id": tarefa.id,
+        "estado": estado,
+        "lotes": len(tarefa.results),
+        "lotes_concluidos": len(concluidos),
+        "lotes_falhos": len(falhas),
+        "mensagens_classificadas": sum(r.result for r in concluidos),
+        "erro": str(falhas[0].result) if falhas else None,
+    })
 
 
 @require_GET

@@ -190,7 +190,9 @@ chat_100,3,sistema,URA Bot,Protocolo finalizado: 2026100,Mariana Souza,119999988
 
 ## `POST /api/conversas/analisar`
 
-Dispara a inferência da IA para classificar o sentimento das mensagens de usuário (`positivo | negativo | neutro`) das conversas previamente importadas. `application/json`. **CSRF desativado** (`@csrf_exempt`).
+Enfileira a classificação de sentimento das mensagens de usuário (`positivo | negativo | neutro`) das conversas previamente importadas. `application/json`. **CSRF desativado** (`@csrf_exempt`).
+
+**Assíncrono.** A requisição só divide as conversas em lotes de 50 e os coloca na fila (Celery + Redis). Quem classifica são os workers, e a resposta volta em dezenas de milissegundos com um `tarefa_id`. O progresso fica em `GET /api/conversas/analisar/<tarefa_id>`. Cada worker lê do banco no máximo 256 mensagens por vez, então a memória dele não cresce com o tamanho da base.
 
 > 🔒 **Autenticação:** Rota protegida via JWT (`@jwt_required`). Requer cabeçalho `Authorization: Bearer <access_token>` de qualquer usuário autenticado (`ADMIN` ou `USER`).
 
@@ -211,22 +213,50 @@ Dispara a inferência da IA para classificar o sentimento das mensagens de usuá
 }
 ```
 
-### Resposta
+### Resposta (`202 Accepted`)
 
 ```json
 {
+  "tarefa_id": "9bb7f697-f96b-449a-bea4-f7c4ec51a197",
   "fonte": "piloto",
   "total_conversas": 2,
-  "mensagens_classificadas": 2,
+  "lotes": 1,
   "modelo_utilizado": "lexico"
 }
 ```
 
 | Status | Quando |
 |---|---|
-| 200 | Mensagens analisadas e classificadas com sucesso |
+| 202 | Lotes enfileirados; acompanhe pelo `tarefa_id` |
 | 400 | Payload malformado, modelo inválido ou ausência de `fonte`/`conversa_ids` |
 | 404 | Nenhuma conversa encontrada para a fonte ou IDs informados |
+| 503 | BERTimbau sem `model.int8.onnx` exportado (`manage.py exportar_onnx`) ou fila (Redis) fora do ar |
+
+---
+
+## `GET /api/conversas/analisar/<tarefa_id>`
+
+Progresso de uma classificação. Exige JWT. Consulte a cada ~2 s até `estado` deixar de ser `processando`. O resultado expira em 24 h.
+
+```json
+{
+  "tarefa_id": "9bb7f697-f96b-449a-bea4-f7c4ec51a197",
+  "estado": "concluido",
+  "lotes": 94,
+  "lotes_concluidos": 94,
+  "lotes_falhos": 0,
+  "mensagens_classificadas": 4652,
+  "erro": null
+}
+```
+
+`estado`: `processando` | `concluido` | `erro`. Só vira `erro` depois que todos os lotes terminam: enquanto algum ainda roda, o estado segue `processando` e as falhas aparecem em `lotes_falhos` (reenviar antes disso classificaria as mesmas mensagens duas vezes). Em `erro`, o campo `erro` traz a mensagem do primeiro lote que falhou. Lotes concluídos antes de uma falha já ficaram gravados no banco.
+
+| Status | Quando |
+|---|---|
+| 200 | Estado atual |
+| 401 | Sem token |
+| 404 | `tarefa_id` inexistente ou expirado |
 
 ---
 

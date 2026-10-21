@@ -26,10 +26,20 @@ export interface UploadResponse {
 }
 
 export interface AnalisarResponse {
+  tarefa_id: string;
   fonte: string;
   total_conversas: number;
-  mensagens_classificadas: number;
+  lotes: number;
   modelo_utilizado: Modelo;
+}
+
+export interface StatusAnaliseResponse {
+  tarefa_id: string;
+  estado: "processando" | "concluido" | "erro";
+  lotes: number;
+  lotes_concluidos: number;
+  mensagens_classificadas: number;
+  erro: string | null;
 }
 
 export interface Indicadores {

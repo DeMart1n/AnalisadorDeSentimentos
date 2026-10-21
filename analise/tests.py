@@ -435,10 +435,11 @@ class ApiTest(TestCase):
                 content_type="application/json",
                 **self.user_headers,
             )
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 202)
         self.assertEqual(r.json()["fonte"], "teste")
         self.assertEqual(r.json()["total_conversas"], 2)
-        self.assertEqual(r.json()["mensagens_classificadas"], 2)
+        status = self.client.get(f"/api/conversas/analisar/{r.json()['tarefa_id']}", **self.user_headers)
+        self.assertEqual(status.json()["mensagens_classificadas"], 2)
 
     def test_analisar_conversas_fonte_inexistente(self):
         r = self.client.post(

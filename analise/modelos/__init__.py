@@ -9,21 +9,26 @@ entre os degraus:
 Degraus: lexico (piso) -> classico (TF-IDF) -> bertimbau (alvo do projeto).
 """
 
-from .classico import Classico
 from .lexico import Lexico
 
 class ModeloNaoTreinado(RuntimeError):
     """Modelo sem pesos salvos: prever com ele daria resultado aleatório."""
 
 
-REGISTRO = {"lexico": Lexico, "classico": Classico, "bertimbau": None}
+# None = import tardio: torch e sklearn pesam centenas de MB e o processo web não usa nenhum
+REGISTRO = {"lexico": Lexico, "classico": None, "bertimbau": None}
 
 
 def _bertimbau():
-    # import tardio: torch demora a carregar e nem todo comando precisa dele
     from .bertimbau import Bertimbau
 
     return Bertimbau
+
+
+def _classico():
+    from .classico import Classico
+
+    return Classico
 
 
 def carregar(nome):
@@ -31,4 +36,6 @@ def carregar(nome):
         raise ValueError(f"modelo desconhecido: {nome}. Disponíveis: {', '.join(REGISTRO)}")
     if nome == "bertimbau":
         return _bertimbau()()
+    if nome == "classico":
+        return _classico()()
     return REGISTRO[nome]()
