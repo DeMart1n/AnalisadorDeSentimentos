@@ -14,10 +14,12 @@ Detalhes de design em [docs/ARQUITETURA.md](../ARQUITETURA.md); contratos em
 | `analise/importacao.py` | 104 | leitura e validação de CSV/JSON |
 | `analise/avaliacao.py` | 67 | split por conversa, F1 macro, matriz, McNemar |
 | `analise/models.py` | 42 | `Conversa`, `Mensagem`, constantes de rótulo/autor |
-| `analise/classificador.py` | 29 | cache do modelo, classificação em lote |
+| `analise/mappers/ia_mapper.py` | 181 | sanitização, mitigação de prompt injection e otimização para IA |
+| `analise/classificador.py` | 45 | cache do modelo, aplicação do mapper e classificação em lote |
 | `analise/indicadores.py` | 28 | trajetória da conversa |
 | `analise/urls.py` | 10 | roteamento |
-| `analise/tests.py` | 186 | 26 testes |
+| `analise/tests.py` | 186 | testes de regressão |
+| `analise/test_ia_mapper.py` | 127 | testes unitários do mapper para IA |
 | `management/commands/` | 196 | `importar_kaggle`, `importar_conversas`, `treinar_bertimbau`, `avaliar` |
 | `AnalisadorDeSentimentos/` | 184 | settings, urls raiz, wsgi/asgi |
 

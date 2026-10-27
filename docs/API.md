@@ -228,6 +228,13 @@ Dispara a inferência da IA para classificar o sentimento das mensagens de usuá
 | 400 | Payload malformado, modelo inválido ou ausência de `fonte`/`conversa_ids` |
 | 404 | Nenhuma conversa encontrada para a fonte ou IDs informados |
 
+### Pipeline de Processamento (AI Mapper)
+
+Antes da predição pelo modelo, todas as mensagens de usuário passam pelo **`ConversaIAMapper`**:
+- **Higienização e Defesa:** Remoção de caracteres de controle invisíveis (`\x00`, `\u200b`), tags HTML, neutralização de URLs longas para `[URL]` e detecção preventiva de *prompt injections* (substituídos por `[REMOVIDO]`).
+- **Otimização e Economia de Tokens:** Contração de letras repetidas em excesso (ex: `"nããão"` ➔ `"nãão"`), compressão de pontuações redundantes (`"????"` ➔ `"?"`) e múltiplos espaços.
+- **Truncamento seguro:** Limite defensivo de até 512 caracteres por mensagem.
+
 ---
 
 ## `GET /api/conversas`
