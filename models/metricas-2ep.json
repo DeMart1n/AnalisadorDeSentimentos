@@ -1,0 +1,94 @@
+{
+  "n_teste": 12615,
+  "modelos": [
+    {
+      "nome": "lexico",
+      "f1_macro": 0.4885,
+      "matriz": [
+        [
+          3303,
+          114,
+          1272
+        ],
+        [
+          414,
+          1626,
+          2745
+        ],
+        [
+          1430,
+          345,
+          1366
+        ]
+      ]
+    },
+    {
+      "nome": "classico",
+      "f1_macro": 0.7345,
+      "matriz": [
+        [
+          3644,
+          163,
+          882
+        ],
+        [
+          88,
+          4094,
+          603
+        ],
+        [
+          674,
+          671,
+          1796
+        ]
+      ]
+    },
+    {
+      "nome": "bertimbau",
+      "f1_macro": 0.7664,
+      "matriz": [
+        [
+          3859,
+          89,
+          741
+        ],
+        [
+          68,
+          4159,
+          558
+        ],
+        [
+          668,
+          565,
+          1908
+        ]
+      ]
+    }
+  ],
+  "mcnemar": [
+    {
+      "a": "lexico",
+      "b": "classico",
+      "acertos_so_de_a": 1343,
+      "acertos_so_de_b": 4582,
+      "p": 0.0,
+      "significativo": true
+    },
+    {
+      "a": "lexico",
+      "b": "bertimbau",
+      "acertos_so_de_a": 1102,
+      "acertos_so_de_b": 4733,
+      "p": 0.0,
+      "significativo": true
+    },
+    {
+      "a": "classico",
+      "b": "bertimbau",
+      "acertos_so_de_a": 752,
+      "acertos_so_de_b": 1144,
+      "p": 2.0319560669385522e-19,
+      "significativo": true
+    }
+  ]
+}

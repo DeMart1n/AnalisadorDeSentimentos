@@ -17,6 +17,15 @@ from analise.models import ORIGINAL_DATASET, USUARIO, Conversa, Mensagem, Rotulo
 
 FONTE = "goemotions_pt"
 PADRAO = Path(__file__).resolve().parents[3] / "data" / "goemotions" / "traduzido.jsonl"
+# raiva mais estreita que o mapa oficial: sem `disapproval`, que puxava neutro para raiva
+# (34% -> 23% das mensagens; relatório de 2026-10-05). Linha sem "original" fica com o "ekman".
+RAIVA = {"anger", "annoyance"}
+
+
+def ekman(linha):
+    if not linha.get("original"):
+        return set(linha["ekman"])
+    return set(linha["ekman"]) - {"anger"} | ({"anger"} if RAIVA & set(linha["original"]) else set())
 
 
 class Command(BaseCommand):
@@ -42,7 +51,7 @@ class Command(BaseCommand):
                 for c, l in zip(conversas, linhas)], batch_size=2000)
             RotuloEmocao.objects.bulk_create([
                 RotuloEmocao(mensagem=m, origem=ORIGINAL_DATASET, anotador=FONTE,
-                             **{campo: col in l["ekman"] for col, campo in EMOCOES.items()})
+                             **{campo: col in ekman(l) for col, campo in EMOCOES.items()})
                 for m, l in zip(mensagens, linhas)], batch_size=2000)
 
         por_split = {s: sum(l["split"] == s for l in linhas) for s in ("train", "dev", "test")}

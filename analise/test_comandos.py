@@ -275,3 +275,17 @@ class TreinarBertimbauComandoTest(SplitTemporarioMixin, TestCase):
         out, _ = _rodar("treinar_bertimbau", "--amostra", "5", "--fonte", "teste")
         self.assertEqual(len(FakeBertimbau.instancias[0].textos), 5)
         self.assertIn("treino: 5 | teste reservado: 6", out)
+
+
+class EmocoesLlmNotasTest(TestCase):
+    def test_notas_na_ordem_e_cortadas(self):
+        from .management.commands.emocoes_llm import notas
+        resposta = json.dumps({"nojo": 1.4, "alegria": 0.9, "raiva": -0.2, "tristeza": 0, "medo": 0.5, "surpresa": 0.1})
+        self.assertEqual(notas(resposta), [0.9, 0.0, 0.0, 0.5, 0.1, 1.0])
+
+    def test_misturar_so_onde_ha_nota(self):
+        from .management.commands.emocoes_llm import misturar
+        exemplos = [{"origem_id": "a", "y": [1, 0]}, {"origem_id": "b", "y": [0, 1]}]
+        self.assertEqual(misturar(exemplos, {"a": [0.0, 0.8]}, 0.5), 1)
+        self.assertEqual(exemplos[0]["y"], [0.5, 0.4])
+        self.assertEqual(exemplos[1]["y"], [0, 1])

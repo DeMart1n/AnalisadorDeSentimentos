@@ -682,6 +682,25 @@ class RotuloEmocaoTest(TestCase):
         self.assertEqual(r.mensagem.conversa.origem_id, "dev_e1")
         self.assertTrue(r.mensagem.texto.startswith("[NOME]"))
 
+    def test_importar_goemotions_raiva_sem_disapproval(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+
+        from .models import RotuloEmocao
+
+        linhas = [{"id": "e1", "ekman": ["anger"], "original": ["disapproval"]},
+                  {"id": "e2", "ekman": ["anger", "joy"], "original": ["annoyance", "joy"]}]
+        with tempfile.TemporaryDirectory() as d:
+            arq = Path(d) / "t.jsonl"
+            arq.write_text("".join(json.dumps({**l, "split": "dev", "texto": "x", "texto_pt": "y"}) + "\n"
+                                   for l in linhas))
+            call_command("importar_goemotions", arquivo=arq, stdout=open("/dev/null", "w"))
+        rotulos = {r.mensagem.conversa.origem_id: r.emocoes for r in RotuloEmocao.objects.all()}
+        self.assertEqual(rotulos, {"dev_e1": [], "dev_e2": ["alegria", "raiva"]})
+
 
 class EmocoesTest(TestCase):
     def test_limiar_maximiza_f1_por_emocao(self):
