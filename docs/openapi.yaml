@@ -235,6 +235,7 @@ paths:
       description: |
         Dispara a classificação de sentimento (`positivo`, `negativo`, `neutro`) nas mensagens enviadas por usuários.
         A inferência pode ser executada por uma base inteira (`fonte`) ou por uma lista de `conversa_ids`.
+        Antes da predição, os textos passam pelo pipeline do ConversaIAMapper (sanitização de caracteres invisíveis/HTML, neutralização de URLs e prompt injections, redução de ruído cognitivo e economia de tokens).
       operationId: analisarConversas
       security:
         - BearerAuth: []
