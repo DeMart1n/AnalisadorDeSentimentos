@@ -289,3 +289,27 @@ class EmocoesLlmNotasTest(TestCase):
         self.assertEqual(misturar(exemplos, {"a": [0.0, 0.8]}, 0.5), 1)
         self.assertEqual(exemplos[0]["y"], [0.5, 0.4])
         self.assertEqual(exemplos[1]["y"], [0, 1])
+
+
+class AnotarComandoTest(TestCase):
+    def setUp(self):
+        for c in range(3):
+            conversa = Conversa.objects.create(origem_id=f"c{c}", fonte="chat")
+            Mensagem.objects.create(conversa=conversa, ordem=1, autor=ATENDENTE, texto="olá, em que posso ajudar?")
+            Mensagem.objects.create(conversa=conversa, ordem=2, autor=USUARIO, texto=f"mensagem {c}")
+
+    def _anotar(self, *respostas):
+        with patch("builtins.input", side_effect=list(respostas)):
+            return _rodar("anotacao", "anotar", "--fontes", "chat", "--anotador", "ana", "--n", "3")[0]
+
+    def test_grava_volta_e_continua_de_onde_parou(self):
+        from .models import HUMANO, RotuloEmocao
+        out = self._anotar("xyz", "ar", "v", "0", "q")  # inválido, anota, volta, refaz como neutro, sai
+        self.assertIn("não entendi", out)
+        self.assertIn("anterior: olá", out)
+        rotulos = RotuloEmocao.objects.filter(origem=HUMANO, anotador="ana")
+        self.assertEqual([r.emocoes for r in rotulos], [[]])
+
+        self._anotar("t", "mn")  # retoma nas duas que faltam; sem mais input termina sozinho
+        self.assertEqual(sorted(sorted(r.emocoes) for r in rotulos.all()), [[], ["medo", "nojo"], ["tristeza"]])
+        self.assertIn("3/3 já anotadas", self._anotar())

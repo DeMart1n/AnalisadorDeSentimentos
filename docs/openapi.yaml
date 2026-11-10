@@ -416,18 +416,24 @@ paths:
                     rotulo: null
                     score: null
                     rotulo_real: null
+                    emocoes: null
+                    emocoes_score: null
                   - ordem: 2
                     autor: "usuario"
                     texto: "Demorou demais!"
                     rotulo: "negativo"
                     score: 0.97
                     rotulo_real: "negativo"
+                    emocoes: ["raiva"]
+                    emocoes_score: {alegria: 0.02, raiva: 0.88, tristeza: 0.21, medo: 0.03, surpresa: 0.05, nojo: 0.12}
                   - ordem: 3
                     autor: "usuario"
                     texto: "Obrigado, resolveu meu problema!"
                     rotulo: "positivo"
                     score: 0.99
                     rotulo_real: "positivo"
+                    emocoes: ["alegria"]
+                    emocoes_score: {alegria: 0.93, raiva: 0.01, tristeza: 0.02, medo: 0.01, surpresa: 0.04, nojo: 0.01}
         '404':
           description: Conversa não encontrada
           content:
@@ -625,7 +631,7 @@ components:
         apenas_nao_classificadas:
           type: boolean
           default: true
-          description: "Se true, analisa apenas mensagens sem rotulo_pred"
+          description: "Se true, analisa apenas mensagens sem rotulo_pred (ou, no modelo bertimbau, sem emocoes_pred)"
 
     AnalisarConversasOutput:
       type: object
@@ -727,6 +733,23 @@ components:
           type: string
           enum: [positivo, negativo, neutro]
           nullable: true
+        emocoes:
+          type: array
+          nullable: true
+          description: >
+            Emoções acima do limiar do modelo; [] = neutro; null = não classificada.
+            Nojo, medo e surpresa não são confiáveis (F1 0,21–0,38 no BRIGHTER PT-BR):
+            o frontend decide se exibe.
+          items:
+            type: string
+            enum: [alegria, raiva, tristeza, medo, surpresa, nojo]
+        emocoes_score:
+          type: object
+          nullable: true
+          description: Probabilidade por emoção (0–1).
+          additionalProperties:
+            type: number
+            format: float
 
     ConversaDetalheResponse:
       type: object

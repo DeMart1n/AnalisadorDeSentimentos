@@ -47,7 +47,7 @@ gerar os dois do zero, veja [docs/TREINAMENTO.md](docs/TREINAMENTO.md).
 ## Uso rápido
 
 ```bash
-uv run manage.py exportar_onnx   # uma vez por treino: gera models/bertimbau/model.int8.onnx
+uv run manage.py exportar_onnx   # uma vez por treino: gera model.int8.onnx em models/bertimbau e models/emocoes
 redis-server &
 uv run manage.py runserver
 uv run celery -A AnalisadorDeSentimentos worker --pool=solo -l info   # 1 terminal por worker

@@ -237,7 +237,8 @@ def conversa(request, conversa_id):
         "indicadores": indicadores([m.rotulo_pred for m in mensagens if m.autor == USUARIO]),
         "mensagens": [
             {"ordem": m.ordem, "autor": m.autor, "texto": m.texto,
-             "rotulo": m.rotulo_pred, "score": m.score, "rotulo_real": m.rotulo_real}
+             "rotulo": m.rotulo_pred, "score": m.score, "rotulo_real": m.rotulo_real,
+             "emocoes": m.emocoes_pred, "emocoes_score": m.emocoes_score}
             for m in mensagens
         ],
     })
