@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { api, MetricasResponse, ConversaListResponse } from '@/lib/api';
+import { api, MetricasResponse, ConversaListResponse, EMOCOES } from '@/lib/api';
 import { AppLayout } from '@/components/AppLayout';
 import Link from 'next/link';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
@@ -43,6 +43,13 @@ export default function DashboardPage() {
     { name: 'Negativo', value: dist.negativo, color: '#ef4444' }, // rose-500
     { name: 'Neutro', value: dist.neutro, color: '#64748b' }      // slate-500
   ];
+
+  // Emoções: % das mensagens de cliente com emoção classificada (uma mensagem pode ter várias)
+  const msgsComEmocao = metricas?.emocoes?.mensagens ?? 0;
+  const barrasEmocao = [...EMOCOES, { chave: 'neutro' as const, nome: 'Neutro', cor: '#64748b' }].map(e => {
+    const n = metricas?.emocoes?.contagem[e.chave] ?? 0;
+    return { ...e, n, pct: msgsComEmocao ? (n / msgsComEmocao) * 100 : 0 };
+  });
 
   // Modelos de IA
   const modelos = metricas?.modelos;
@@ -185,6 +192,33 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+      </section>
+
+      {/* Emoções nas mensagens */}
+      <section className="bg-surface-container-lowest border border-outline-variant rounded-xl p-space-lg shadow-sm mb-space-xl">
+        <div className="pb-space-md border-b border-outline-variant mb-space-md">
+          <h2 className="font-headline-md text-headline-md text-on-surface font-bold">Emoções nas Mensagens dos Clientes</h2>
+          <p className="text-body-sm text-outline mt-1">
+            {msgsComEmocao
+              ? `${msgsComEmocao.toLocaleString('pt-BR')} mensagens classificadas; uma mensagem pode ter mais de uma emoção.`
+              : 'Sem emoções classificadas ainda. Rode a análise com o BERTimbau para gerá-las.'}
+          </p>
+        </div>
+        {msgsComEmocao > 0 && (
+          <ul className="flex flex-col gap-3">
+            {barrasEmocao.map(e => (
+              <li key={e.chave} className="grid grid-cols-[6rem_1fr_7rem] items-center gap-3 text-sm">
+                <span className="font-semibold text-on-surface">{e.nome}</span>
+                <div className="h-2.5 bg-surface-container-high rounded-full overflow-hidden" role="presentation">
+                  <div className="h-full rounded-full" style={{ width: `${e.pct}%`, backgroundColor: e.cor }}></div>
+                </div>
+                <span className="text-right tabular-nums text-on-surface-variant">
+                  {e.pct.toFixed(1)}% <span className="text-outline">({e.n.toLocaleString('pt-BR')})</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {/* 3. CASOS CRÍTICOS */}

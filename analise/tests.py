@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.contrib.auth.hashers import make_password
 
 from .importacao import ErroDeImportacao, importar
-from .models import Conversa, Mensagem, Users
+from .models import USUARIO, Conversa, Mensagem, Users
 from .auth import token_generator
 
 CSV = (
@@ -555,9 +555,16 @@ class ApiTest(TestCase):
         self.assertEqual(self.client.get("/api/conversas/99999").status_code, 404)
 
     def test_metricas(self):
+        Mensagem.objects.filter(autor=USUARIO).update(emocoes_pred=[])
+        Mensagem.objects.filter(autor=USUARIO).filter(pk=Mensagem.objects.filter(autor=USUARIO).first().pk) \
+            .update(emocoes_pred=["raiva", "tristeza"])
         r = self.client.get("/api/metricas")
         self.assertEqual(r.status_code, 200)
         self.assertIn("distribuicao", r.json())
+        emocoes = r.json()["emocoes"]["contagem"]
+        self.assertEqual(r.json()["emocoes"]["mensagens"], Mensagem.objects.filter(autor=USUARIO).count())
+        self.assertEqual((emocoes["raiva"], emocoes["tristeza"], emocoes["alegria"]), (1, 1, 0))
+        self.assertEqual(emocoes["neutro"], Mensagem.objects.filter(autor=USUARIO).count() - 1)
 
     def test_openapi_spec(self):
         r = self.client.get("/api/openapi.yaml")

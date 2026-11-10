@@ -465,6 +465,9 @@ paths:
                   positivo: 1250
                   negativo: 820
                   neutro: 430
+                emocoes:
+                  mensagens: 2500
+                  contagem: {alegria: 610, raiva: 540, tristeza: 300, medo: 45, surpresa: 80, nojo: 30, neutro: 1100}
                 total_conversas: 1200
                 modelos:
                   n_teste: 12615
@@ -775,6 +778,16 @@ components:
           type: object
           additionalProperties:
             type: integer
+        emocoes:
+          type: object
+          description: Mensagens de cliente com emoções classificadas (só o BERTimbau gera). Uma mensagem pode contar em várias emoções; `neutro` = nenhuma.
+          properties:
+            mensagens:
+              type: integer
+            contagem:
+              type: object
+              additionalProperties:
+                type: integer
         total_conversas:
           type: integer
         modelos:

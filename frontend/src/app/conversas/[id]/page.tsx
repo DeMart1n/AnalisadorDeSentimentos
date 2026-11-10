@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { api, ConversaDetalhe, Sentimento, Mensagem } from '@/lib/api';
+import { api, ConversaDetalhe, Sentimento, EMOCOES } from '@/lib/api';
 import { AppLayout } from '@/components/AppLayout';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -56,7 +56,14 @@ export default function DetalheConversaPage() {
   if (countNeg > predCount) { predominante = 'negativo'; predCount = countNeg; }
   const predominantePct = totalClassified > 0 ? ((predCount / totalClassified) * 100).toFixed(0) : '0';
 
-  const piorMensagem = indicadores?.pior_momento 
+  // Emoções: quantas mensagens do cliente expressam cada uma (uma mensagem pode ter várias)
+  const comEmocoes = userMsgs.filter(m => m.emocoes !== null);
+  const emocoesConversa = EMOCOES
+    .map(e => ({ ...e, n: comEmocoes.filter(m => m.emocoes!.includes(e.chave)).length }))
+    .filter(e => e.n > 0)
+    .sort((a, b) => b.n - a.n);
+
+  const piorMensagem = indicadores?.pior_momento
     ? userMsgs[indicadores.pior_momento - 1] 
     : null;
 
@@ -272,6 +279,31 @@ export default function DetalheConversaPage() {
               </ResponsiveContainer>
             </div>
           </section>
+
+          {/* Emoções da conversa */}
+          <section className="bg-surface-container-lowest rounded-xl border border-outline-variant p-space-lg shadow-sm mb-space-xl">
+            <h2 className="font-headline-md text-lg text-on-surface font-bold">Emoções do Cliente</h2>
+            <p className="text-sm text-outline mt-1 mb-4">
+              {comEmocoes.length === 0
+                ? 'Sem emoções classificadas. Rode a análise com o BERTimbau para gerá-las.'
+                : `Em ${comEmocoes.length} mensagens do cliente; uma mensagem pode ter mais de uma emoção.`}
+            </p>
+            {comEmocoes.length > 0 && (
+              emocoesConversa.length === 0 ? (
+                <span className="text-sm text-on-surface-variant">Nenhuma emoção detectada: todas as mensagens são neutras.</span>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {emocoesConversa.map(e => (
+                    <span key={e.chave} className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold border border-outline-variant bg-surface-container-low text-on-surface">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: e.cor }}></span>
+                      {e.nome}
+                      <span className="text-outline font-normal">{e.n} {e.n === 1 ? 'mensagem' : 'mensagens'}</span>
+                    </span>
+                  ))}
+                </div>
+              )
+            )}
+          </section>
         </>
       ) : (
         <div className="mb-space-xl p-4 bg-surface-container rounded-xl text-center text-on-surface-variant border border-outline-variant">
@@ -350,6 +382,20 @@ export default function DetalheConversaPage() {
                   <p className="font-body-md text-sm text-on-surface">
                     {msg.texto}
                   </p>
+                  {isUser && msg.emocoes && msg.emocoes.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {EMOCOES.filter(e => msg.emocoes!.includes(e.chave)).map(e => (
+                        <span
+                          key={e.chave}
+                          title={msg.emocoes_score ? `${Math.round(msg.emocoes_score[e.chave] * 100)}% de probabilidade` : undefined}
+                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold border border-outline-variant bg-white/70 text-on-surface"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: e.cor }}></span>
+                          {e.nome}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );

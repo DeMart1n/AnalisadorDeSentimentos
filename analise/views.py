@@ -15,7 +15,7 @@ from .classificador import verificar
 from .importacao import ErroDeImportacao, importar
 from .indicadores import indicadores
 from .modelos import ModeloNaoTreinado
-from .models import USUARIO, Conversa, Mensagem, Users
+from .models import EMOCOES, USUARIO, Conversa, Mensagem, Users
 from .dtos.user.create_user_dto import CreateUserDTO, UserOutputDTO
 from .dtos.user.login_dto import LoginUserDTO, LoginOutputDTO
 from .dtos.user.refresh_token_dto import RefreshTokenDTO, RefreshTokenOutputDTO
@@ -244,6 +244,19 @@ def conversa(request, conversa_id):
     })
 
 
+def _contagem_emocoes():
+    """{"mensagens": N, "contagem": {emoção: n}}: uma mensagem pode contar em várias emoções."""
+    # ponytail: conta em Python porque JSONField de lista não tem `contains` no SQLite;
+    # na casa de milhões de mensagens, trocar por colunas booleanas ou agregação no Postgres
+    contagem, total = dict.fromkeys([*EMOCOES, "neutro"], 0), 0
+    for emocoes in (Mensagem.objects.filter(autor=USUARIO, emocoes_pred__isnull=False)
+                    .values_list("emocoes_pred", flat=True).iterator(chunk_size=5000)):
+        total += 1
+        for e in emocoes or ["neutro"]:
+            contagem[e] += 1
+    return {"mensagens": total, "contagem": contagem}
+
+
 @require_GET
 def metricas(request):
     distribuicao = dict(
@@ -255,6 +268,7 @@ def metricas(request):
     modelos = json.loads(METRICAS.read_text()) if METRICAS.exists() else None
     return JsonResponse({
         "distribuicao": distribuicao,
+        "emocoes": _contagem_emocoes(),
         "total_conversas": Conversa.objects.count(),
         "modelos": modelos,
     })
