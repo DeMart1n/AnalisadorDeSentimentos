@@ -48,7 +48,7 @@ def carregar_emocoes(fontes=None):
         m = r.mensagem
         anteriores = [t for o, t in ordem[m.conversa_id] if o < m.ordem]
         dados.append({
-            "fonte": m.conversa.fonte, "origem_id": m.conversa.origem_id,
+            "fonte": m.conversa.fonte, "origem_id": m.conversa.origem_id, "origem": r.origem,
             "anterior": anteriores[-1] if anteriores else "", "texto": m.texto,
             "y": [int(getattr(r, e)) for e in EMOCOES],
         })
@@ -58,11 +58,15 @@ def carregar_emocoes(fontes=None):
 def split_emocoes(dados):
     """{"treino": [...], "validacao": [...], "teste_<fonte>": [...]} pelo split original de cada fonte.
 
-    Chat real e sintético ainda não têm split congelado (Fases 3 e 5): falha alto em vez de
-    deixá-los cair no treino e, depois, no teste.
+    Rótulo humano de chat real é sempre teste ("teste_<fonte>"), nunca treino: é a prova do
+    domínio real. Outros rótulos de chat (LLM, sintético) ainda não têm split congelado
+    (Fases 3 e 5): falha alto em vez de deixá-los cair no treino e, depois, no teste.
     """
     partes = defaultdict(list)
     for d in dados:
+        if d["fonte"] not in PUBLICAS and d.get("origem") == HUMANO:
+            partes[f"teste_{d['fonte']}"].append(d)
+            continue
         if d["fonte"] not in PUBLICAS:
             raise ValueError(f"fonte {d['fonte']!r} sem split congelado — gerar models/splits/emocoes.json antes")
         s = PUBLICAS[d["fonte"]](d["origem_id"])

@@ -740,4 +740,7 @@ class EmocoesTest(TestCase):
         self.assertEqual({k: len(v) for k, v in partes.items()},
                          {"validacao": 1, "teste_goemotions_pt": 1, "treino": 1})
         with self.assertRaises(ValueError):
-            split_emocoes([{"fonte": "chat", "origem_id": "c1"}])
+            split_emocoes([{"fonte": "chat", "origem_id": "c1", "origem": "llm"}])
+        # rótulo humano de chat real vira teste, nunca treino
+        self.assertEqual(list(split_emocoes([{"fonte": "chat", "origem_id": "c1", "origem": "humano"}])),
+                         ["teste_chat"])

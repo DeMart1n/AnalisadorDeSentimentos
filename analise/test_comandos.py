@@ -313,3 +313,16 @@ class AnotarComandoTest(TestCase):
         self._anotar("t", "mn")  # retoma nas duas que faltam; sem mais input termina sozinho
         self.assertEqual(sorted(sorted(r.emocoes) for r in rotulos.all()), [[], ["medo", "nojo"], ["tristeza"]])
         self.assertIn("3/3 já anotadas", self._anotar())
+
+
+class BancadaComparacaoTest(TestCase):
+    def test_rotulo_diferente_ou_prob_fora_da_tolerancia_reprova(self):
+        from .management.commands.bancada import comparar
+
+        ref = {"a": ("positivo", [0.9]), "b": (["raiva"], [0.8, 0.1])}
+        n, rotulos, delta, _ = comparar(ref, {"a": ("positivo", [0.9004]), "b": (["raiva"], [0.8, 0.1])}, 1e-3)
+        self.assertEqual((n, rotulos), (2, 0))
+        self.assertAlmostEqual(delta, 0.0004)
+        self.assertTrue(comparar(ref, {"a": ("positivo", [0.9004])}, 1e-3)[3])
+        self.assertFalse(comparar(ref, {"a": ("negativo", [0.9])}, 1e-3)[3])   # rótulo mudou
+        self.assertFalse(comparar(ref, {"a": ("positivo", [0.95])}, 1e-3)[3])  # prob além da tolerância
