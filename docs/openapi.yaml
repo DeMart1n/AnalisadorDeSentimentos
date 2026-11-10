@@ -236,6 +236,7 @@ paths:
         Enfileira a classificação de sentimento (`positivo`, `negativo`, `neutro`) nas mensagens enviadas por usuários,
         por base inteira (`fonte`) ou por lista de `conversa_ids`. As conversas viram lotes de 50, processados pelos
         workers Celery. Acompanhe com `GET /conversas/analisar/{tarefa_id}`.
+        Antes da predição, os textos passam pelo ConversaIAMapper (sanitização de caracteres invisíveis/HTML, neutralização de URLs e prompt injections, redução de ruído).
       operationId: analisarConversas
       security:
         - BearerAuth: []

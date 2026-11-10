@@ -32,9 +32,13 @@ analise/
   importacao.py              leitura e validação de CSV/JSON
   classificador.py           aplica o modelo às mensagens já gravadas
   indicadores.py             indicadores de sessão
+  mappers/
+    __init__.py              exporta ConversaIAMapper e DTOs de resultado
+    ia_mapper.py             sanitização, mitigação de prompt injection e economia de tokens
   avaliacao.py               split por conversa, F1 macro, matriz, McNemar
   views.py / urls.py         API
-  tests.py                   26 testes
+  tests.py                   testes de regressão
+  test_ia_mapper.py          testes unitários do pipeline de mapeamento para IA
   modelos/
     __init__.py              registro dos degraus e factory `carregar(nome)`
     lexico.py                degrau 1
@@ -97,6 +101,23 @@ alternar entre dois degraus sem recarregar, sem segurar três modelos em memóri
 `bertimbau` o cache guarda o `BertimbauOnnx` (`model.int8.onnx`, gerado por
 `manage.py exportar_onnx`; `BERTIMBAU_ONNX` troca o arquivo e `ONNX_THREADS` limita os núcleos
 por worker).
+
+## Mapeamento e Otimização para IA (`ConversaIAMapper`)
+
+Antes de qualquer mensagem ser enviada à inferência do modelo (`bertimbau`, `classico` ou `lexico`),
+ela passa pelo pipeline do `ConversaIAMapper` (`analise/mappers/ia_mapper.py`):
+
+1. **Segurança e Defesa em Profundidade:**
+   - **Caracteres de controle e invisíveis:** Remoção de bytes nulos (`\x00`), caracteres de controle ASCII e *zero-width spaces* (`\u200b`, `\ufeff`).
+   - **Mitigação de Prompt Injection:** Neutralização de tentativas de injeção ou subversão de contexto (ex.: `ignore all previous instructions`, delimitadores de sistema `<|im_start|>`, etc.), substituídos por `[REMOVIDO]`.
+   - **Tags HTML e URLs:** Remoção de tags/scripts e substituição de URLs longas por `[URL]` (eliminando parâmetros de tracking que inflacionam tokens sem valor semântico).
+2. **Redução de Ruído Cognitivo e Economia de Tokens:**
+   - **Alongamento léxico:** Contração de letras repetidas em excesso (ex.: `"péssimooooo"` ➔ `"péssimoo"`), prevenindo a fragmentação da palavra em múltiplos subwords desconhecidos pelo tokenizador.
+   - **Pontuação redundante:** Compressão de pontuações repetidas (`"?????"` ➔ `"?"`, `"!!!!!"` ➔ `"!"`).
+   - **Normalização de espaços:** Comprime espaços e quebras de linha em espaço simples.
+   - **Truncamento defensivo:** Limite seguro por mensagem (`limite_caracteres=512`).
+3. **Atalhos Heurísticos Opcionais:**
+   - Mensagens vazias ou saudações estritas e curtas (`"ok"`, `"obrigado"`) podem ser resolvidas de forma direta sem custo de GPU/inferência quando habilitado.
 
 ## Indicadores de sessão
 

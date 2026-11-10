@@ -258,6 +258,13 @@ Progresso de uma classificação. Exige JWT. Consulte a cada ~2 s até `estado` 
 | 401 | Sem token |
 | 404 | `tarefa_id` inexistente ou expirado |
 
+### Pipeline de Processamento (AI Mapper)
+
+Antes da predição pelo modelo, todas as mensagens de usuário passam pelo **`ConversaIAMapper`**:
+- **Higienização e Defesa:** Remoção de caracteres de controle invisíveis (`\x00`, `\u200b`), tags HTML, neutralização de URLs longas para `[URL]` e detecção preventiva de *prompt injections* (substituídos por `[REMOVIDO]`).
+- **Otimização e Economia de Tokens:** Contração de letras repetidas em excesso (ex: `"nããão"` ➔ `"nãão"`), compressão de pontuações redundantes (`"????"` ➔ `"?"`) e múltiplos espaços.
+- **Truncamento seguro:** Limite defensivo de até 512 caracteres por mensagem.
+
 ---
 
 ## `GET /api/conversas`

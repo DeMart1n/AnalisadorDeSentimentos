@@ -11,6 +11,7 @@ from functools import lru_cache
 
 from django.db.models import OuterRef, Q, Subquery
 
+from .mappers.ia_mapper import ConversaIAMapper
 from .models import USUARIO, Mensagem
 from .modelos import ModeloNaoTreinado, carregar, emocoes_onnx
 from .modelos.bertimbau_onnx import DESTINO, caminho_pesos
@@ -42,11 +43,14 @@ def verificar(nome):
             raise ModeloNaoTreinado(f"sem {caminho_pesos(destino)} — rode manage.py exportar_onnx")
 
 
-def classificar_conversas(ids, nome=PADRAO, apenas_nao_classificadas=False, lote=LOTE_MENSAGENS):
+def classificar_conversas(ids, nome=PADRAO, apenas_nao_classificadas=False, lote=LOTE_MENSAGENS, mapper=None):
     """Classifica as mensagens do USUÁRIO das conversas dadas. Devolve quantas foram.
 
-    Paginação por pk em vez de list(qs): a memória fica em `lote` mensagens.
+    Paginação por pk em vez de list(qs): a memória fica em `lote` mensagens. Os textos passam
+    pelo ConversaIAMapper (sanitização e redução de ruído); mensagem que o mapper resolve por
+    atalho não vai ao modelo de polaridade, mas vai ao de emoções.
     """
+    mapper = mapper or ConversaIAMapper()
     com_emocoes = nome == PADRAO
     qs = Mensagem.objects.filter(conversa_id__in=ids, autor=USUARIO).order_by("pk")
     if apenas_nao_classificadas:
@@ -60,13 +64,19 @@ def classificar_conversas(ids, nome=PADRAO, apenas_nao_classificadas=False, lote
         qs = qs.annotate(anterior=Subquery(anterior))
     total, ultimo = 0, 0
     while mensagens := list(qs.filter(pk__gt=ultimo).only("pk", "texto")[:lote]):
-        rotulos, scores = modelo(nome).prever([m.texto for m in mensagens])
-        for m, rotulo, score in zip(mensagens, rotulos, scores):
-            m.rotulo_pred, m.score = rotulo, score
+        itens = mapper.mapear_mensagens(mensagens).itens
+        inferir = [i for i in itens if i.requer_inferencia]
+        if inferir:
+            rotulos, scores = modelo(nome).prever([i.texto_otimizado for i in inferir])
+            for i, rotulo, score in zip(inferir, rotulos, scores):
+                i.mensagem.rotulo_pred, i.mensagem.score = rotulo, score
+        for i in itens:
+            if not i.requer_inferencia:
+                i.mensagem.rotulo_pred, i.mensagem.score = i.classificacao_direta
         atualizados = ["rotulo_pred", "score"]
         if com_emocoes:
             emocoes, probs = modelo_emocoes().prever(
-                [{"anterior": m.anterior, "texto": m.texto} for m in mensagens])
+                [{"anterior": mapper.mapear_texto(i.mensagem.anterior), "texto": i.texto_otimizado} for i in itens])
             for m, e, p in zip(mensagens, emocoes, probs):
                 m.emocoes_pred, m.emocoes_score = e, p
             atualizados += ["emocoes_pred", "emocoes_score"]

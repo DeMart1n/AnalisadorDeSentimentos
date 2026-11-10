@@ -356,7 +356,7 @@ class ClassificadorTest(TestCase):
         with patch("analise.modelos.bertimbau_onnx.BertimbauOnnx", return_value=self.falso), alvo:
             self.assertEqual(classificar_conversas([self.conversa.id]), 2)
         # anterior = mensagem imediatamente anterior, de qualquer autor (aqui, a do atendente)
-        emocoes.prever.assert_called_once_with([{"anterior": None, "texto": "bom"},
+        emocoes.prever.assert_called_once_with([{"anterior": "", "texto": "bom"},
                                                 {"anterior": "ruim", "texto": "ok"}])
         self.u2.refresh_from_db()
         self.assertEqual((self.u2.rotulo_pred, self.u2.emocoes_pred, self.u2.emocoes_score),
