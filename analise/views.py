@@ -1,25 +1,32 @@
 import json
+from itertools import batched
 from pathlib import Path
+
+from celery import group
+from celery.result import GroupResult
+from kombu.exceptions import OperationalError
 
 from django.db.models import Count
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .classificador import classificar_conversas
+from .classificador import verificar
 from .importacao import ErroDeImportacao, importar
 from .indicadores import indicadores
 from .modelos import ModeloNaoTreinado
-from .models import USUARIO, Conversa, Mensagem, Users
+from .models import EMOCOES, USUARIO, Conversa, Mensagem, Users
 from .dtos.user.create_user_dto import CreateUserDTO, UserOutputDTO
 from .dtos.user.login_dto import LoginUserDTO, LoginOutputDTO
 from .dtos.user.refresh_token_dto import RefreshTokenDTO, RefreshTokenOutputDTO
 from .dtos.analise_dto import AnalisarConversasDTO, AnalisarConversasOutputDTO
 from django.contrib.auth.hashers import make_password, check_password
 from .auth import token_generator, decode_refresh_token, jwt_required, admin_required
+from .tasks import classificar_lote
 
 METRICAS = Path(__file__).resolve().parents[1] / "models" / "metricas.json"
 OPENAPI_PATH = Path(__file__).resolve().parents[1] / "docs" / "openapi.yaml"
+LOTE_CONVERSAS = 50  # conversas por tarefa: unidade que os workers dividem entre si
 
 @csrf_exempt
 @require_POST
@@ -136,30 +143,60 @@ def analisar(request):
         if dto.conversa_ids:
             qs = qs.filter(id__in=dto.conversa_ids)
 
-        ids = list(qs.values_list("id", flat=True))
-        if not ids:
+        verificar(dto.modelo)
+        # só ids trafegam: o texto das mensagens é lido pelo worker, lote a lote
+        ids = qs.order_by("id").values_list("id", flat=True).iterator(chunk_size=2000)
+        lotes = [list(lote) for lote in batched(ids, LOTE_CONVERSAS)]
+        if not lotes:
             return JsonResponse({"erro": "Nenhuma conversa encontrada para os critérios informados."}, status=404)
 
-        classificadas = classificar_conversas(
-            ids=ids,
-            nome=dto.modelo,
-            apenas_nao_classificadas=dto.apenas_nao_classificadas,
-        )
+        tarefa = group(
+            classificar_lote.s(lote, dto.modelo, dto.apenas_nao_classificadas) for lote in lotes
+        ).apply_async()
+        tarefa.save()  # sem isso GroupResult.restore não acha o grupo no status
 
         output = AnalisarConversasOutputDTO(
+            tarefa_id=tarefa.id,
             fonte=dto.fonte,
-            total_conversas=len(ids),
-            mensagens_classificadas=classificadas,
+            total_conversas=sum(map(len, lotes)),
+            lotes=len(lotes),
             modelo_utilizado=dto.modelo,
         )
-        return JsonResponse(output.to_dict(), status=200)
+        return JsonResponse(output.to_dict(), status=202)
 
     except ModeloNaoTreinado as e:
         return JsonResponse({"erro": str(e)}, status=503)
+    except OperationalError:
+        return JsonResponse({"erro": "Fila de classificação indisponível. Tente novamente em instantes."}, status=503)
     except json.JSONDecodeError as e:
         return JsonResponse({"erro": f"JSON inválido: {e}"}, status=400)
     except ValueError as e:
         return JsonResponse({"erro": e.args[0]}, status=400)
+
+
+@require_GET
+@jwt_required
+def status_analise(request, tarefa_id):
+    tarefa = GroupResult.restore(tarefa_id)
+    if tarefa is None:
+        return JsonResponse({"erro": "tarefa não encontrada ou expirada"}, status=404)
+    falhas = [r for r in tarefa.results if r.failed()]
+    concluidos = [r for r in tarefa.results if r.successful()]
+    if len(falhas) + len(concluidos) < len(tarefa.results):
+        estado = "processando"  # mesmo com falha: "erro" antes da hora faria o cliente reenfileirar lotes ainda rodando
+    elif falhas:
+        estado = "erro"
+    else:
+        estado = "concluido"
+    return JsonResponse({
+        "tarefa_id": tarefa.id,
+        "estado": estado,
+        "lotes": len(tarefa.results),
+        "lotes_concluidos": len(concluidos),
+        "lotes_falhos": len(falhas),
+        "mensagens_classificadas": sum(r.result for r in concluidos),
+        "erro": str(falhas[0].result) if falhas else None,
+    })
 
 
 @require_GET
@@ -200,10 +237,24 @@ def conversa(request, conversa_id):
         "indicadores": indicadores([m.rotulo_pred for m in mensagens if m.autor == USUARIO]),
         "mensagens": [
             {"ordem": m.ordem, "autor": m.autor, "texto": m.texto,
-             "rotulo": m.rotulo_pred, "score": m.score, "rotulo_real": m.rotulo_real}
+             "rotulo": m.rotulo_pred, "score": m.score, "rotulo_real": m.rotulo_real,
+             "emocoes": m.emocoes_pred, "emocoes_score": m.emocoes_score}
             for m in mensagens
         ],
     })
+
+
+def _contagem_emocoes():
+    """{"mensagens": N, "contagem": {emoção: n}}: uma mensagem pode contar em várias emoções."""
+    # ponytail: conta em Python porque JSONField de lista não tem `contains` no SQLite;
+    # na casa de milhões de mensagens, trocar por colunas booleanas ou agregação no Postgres
+    contagem, total = dict.fromkeys([*EMOCOES, "neutro"], 0), 0
+    for emocoes in (Mensagem.objects.filter(autor=USUARIO, emocoes_pred__isnull=False)
+                    .values_list("emocoes_pred", flat=True).iterator(chunk_size=5000)):
+        total += 1
+        for e in emocoes or ["neutro"]:
+            contagem[e] += 1
+    return {"mensagens": total, "contagem": contagem}
 
 
 @require_GET
@@ -217,6 +268,7 @@ def metricas(request):
     modelos = json.loads(METRICAS.read_text()) if METRICAS.exists() else None
     return JsonResponse({
         "distribuicao": distribuicao,
+        "emocoes": _contagem_emocoes(),
         "total_conversas": Conversa.objects.count(),
         "modelos": modelos,
     })

@@ -31,6 +31,9 @@ class Mensagem(models.Model):
     rotulo_pred = models.CharField(max_length=10, choices=ROTULOS, null=True, blank=True)
     score = models.FloatField(null=True, blank=True)
     rotulo_real = models.CharField(max_length=10, choices=ROTULOS, null=True, blank=True)
+    # previsão do modelo de emoções; os rótulos (humano, LLM, dataset) ficam em RotuloEmocao
+    emocoes_pred = models.JSONField(null=True, blank=True, help_text='["raiva"]; [] = neutro; null = não classificada')
+    emocoes_score = models.JSONField(null=True, blank=True, help_text='probabilidade por emoção: {"raiva": 0.81, ...}')
 
     class Meta:
         ordering = ["conversa_id", "ordem"]

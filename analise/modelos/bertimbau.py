@@ -10,14 +10,10 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from analise.models import NEGATIVO, NEUTRO, POSITIVO
-
 from . import ModeloNaoTreinado
+from .bertimbau_onnx import CLASSES, DESTINO, MAX_LEN
 
 BASE = "neuralmind/bert-base-portuguese-cased"
-DESTINO = Path(__file__).resolve().parents[2] / "models" / "bertimbau"
-CLASSES = [POSITIVO, NEGATIVO, NEUTRO]
-MAX_LEN = 128  # ponytail: cobre a maioria dos reviews; subir se o truncamento doer
 
 
 def pesos_salvos(destino):

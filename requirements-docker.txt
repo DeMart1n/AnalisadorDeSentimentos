@@ -1,3 +1,9 @@
 django>=6.1
 scikit-learn>=1.9.0
 pyjwt>=2.8.0
+# inferência do BERTimbau via ONNX: sem torch/transformers na imagem
+onnxruntime>=1.31.0
+tokenizers>=0.22
+celery>=5.6
+redis>=7.0
+psycopg[binary]>=3.3

@@ -65,9 +65,10 @@ class AnalisarConversasDTO:
 
 @dataclass(frozen=True)
 class AnalisarConversasOutputDTO:
+    tarefa_id: str
     fonte: Optional[str]
     total_conversas: int
-    mensagens_classificadas: int
+    lotes: int
     modelo_utilizado: str
 
     def to_dict(self) -> Dict[str, Any]:

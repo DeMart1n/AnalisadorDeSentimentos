@@ -7,27 +7,32 @@ from django.test import SimpleTestCase, TestCase
 from transformers import BertConfig, BertForSequenceClassification, BertTokenizerFast
 from transformers.utils.logging import disable_progress_bar
 
-from .classificador import classificar_conversas, modelo
+from django.core.management import CommandError, call_command
+
+from .classificador import classificar_conversas, modelo, modelo_emocoes, verificar
 from .modelos import REGISTRO, ModeloNaoTreinado, carregar
 from .modelos.bertimbau import CLASSES, Bertimbau, _Dados, dispositivo, pesos_salvos
+from .modelos import emocoes_onnx
+from .modelos.bertimbau_onnx import ARQUIVO_FP32, ARQUIVO_INT8, BertimbauOnnx
+from .modelos.emocoes_onnx import EmocoesOnnx
 from .modelos.classico import Classico
 from .modelos.lexico import Lexico
-from .models import ATENDENTE, NEGATIVO, NEUTRO, POSITIVO, USUARIO, Conversa, Mensagem
+from .models import ATENDENTE, EMOCOES, NEGATIVO, NEUTRO, POSITIVO, USUARIO, Conversa, Mensagem
 
 disable_progress_bar()
 
 PALAVRAS = ["bom", "ótimo", "ruim", "péssimo", "pedido", "atendimento", "não", "gostei"]
 
 
-def _base_minuscula(pasta):
+def _base_minuscula(pasta, classes=CLASSES):
     """BERT de 1 camada salvo em disco: substitui o BERTimbau real (436 MB) sem rede."""
     vocab = Path(pasta) / "vocab.txt"
     vocab.write_text("\n".join(["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]", *PALAVRAS]), encoding="utf-8")
     tokenizer = BertTokenizerFast(vocab_file=str(vocab), do_lower_case=False)
     config = BertConfig(
         vocab_size=len(PALAVRAS) + 5, hidden_size=8, num_hidden_layers=1, num_attention_heads=1,
-        intermediate_size=16, max_position_embeddings=256, num_labels=len(CLASSES),
-        id2label=dict(enumerate(CLASSES)), label2id={c: i for i, c in enumerate(CLASSES)},
+        intermediate_size=16, max_position_embeddings=256, num_labels=len(classes),
+        id2label=dict(enumerate(classes)), label2id={c: i for i, c in enumerate(classes)},
     )
     torch.manual_seed(0)
     BertForSequenceClassification(config).save_pretrained(pasta)
@@ -84,6 +89,27 @@ class BertimbauTest(SimpleTestCase):
         self.assertEqual(len(rotulos), 3)
         self.assertTrue(set(rotulos) <= set(CLASSES))
         self.assertTrue(all(0 <= s <= 1 for s in scores))
+
+    def test_onnx_exportado_preve_igual_ao_torch(self):
+        b = self._novo()
+        self._treinar(b)
+        with patch("analise.modelos.bertimbau_onnx.DESTINO", self.destino):
+            call_command("exportar_onnx", modelos=["bertimbau"], stdout=open("/dev/null", "w"))
+        self.assertTrue((self.destino / ARQUIVO_INT8).exists())
+
+        textos = ["bom ótimo", "ruim", "pedido não gostei", "palavra desconhecida"]
+        esperado_rotulos, esperado_scores = b.prever(textos)
+        rotulos, scores = BertimbauOnnx(destino=self.destino, arquivo=ARQUIVO_FP32).prever(textos)
+        self.assertEqual(rotulos, esperado_rotulos)
+        for s, e in zip(scores, esperado_scores):
+            self.assertAlmostEqual(s, e, places=3)
+        # lote maior com padding dinâmico não pode mudar o resultado
+        self.assertEqual(BertimbauOnnx(destino=self.destino, arquivo=ARQUIVO_FP32).prever(textos, batch=4)[0], rotulos)
+
+    def test_onnx_sem_arquivo_exportado_levanta_erro(self):
+        self._treinar(self._novo())
+        with self.assertRaisesRegex(ModeloNaoTreinado, "exportar_onnx"):
+            BertimbauOnnx(destino=self.destino)
 
     def test_com_pesos_carrega_do_destino_e_nao_da_base(self):
         self._treinar(self._novo())
@@ -218,10 +244,62 @@ class LexicoArquivoTest(SimpleTestCase):
         self.assertEqual(lexico.pesos["ruim"], -2.0)
 
 
+class EmocoesOnnxTest(SimpleTestCase):
+    def setUp(self):
+        pasta = tempfile.TemporaryDirectory()
+        self.addCleanup(pasta.cleanup)
+        self.destino = Path(pasta.name)
+        _base_minuscula(self.destino, classes=EMOCOES)  # "treinado": pesos + limiares
+        (self.destino / "limiares.json").write_text("[0.5, 0.5, 0.5, 0.5, 0.5, 0.5]")
+        alvo = patch("analise.modelos.emocoes.dispositivo", return_value="cpu")
+        alvo.start()
+        self.addCleanup(alvo.stop)
+
+    def _exportar(self):
+        with patch("analise.modelos.emocoes_onnx.DESTINO", self.destino):
+            call_command("exportar_onnx", modelos=["emocoes"], stdout=open("/dev/null", "w"))
+
+    def test_onnx_exportado_preve_igual_ao_torch_em_par(self):
+        from .modelos.emocoes import Emocoes
+
+        self._exportar()
+        self.assertTrue((self.destino / ARQUIVO_INT8).exists())
+        # sem anterior o par leva "": é assim que o treino codifica a primeira mensagem
+        exemplos = [{"anterior": "", "texto": "bom ótimo"}, {"anterior": "pedido", "texto": "não gostei"},
+                    {"anterior": "ruim", "texto": "palavra desconhecida"}]
+        esperado = Emocoes(destino=self.destino).probabilidades(exemplos)
+        emocoes, probs = EmocoesOnnx(destino=self.destino, arquivo=ARQUIVO_FP32).prever(exemplos)
+        for p, e in zip(probs, esperado):
+            for i, nome in enumerate(EMOCOES):
+                self.assertAlmostEqual(p[nome], float(e[i]), places=3)
+        self.assertEqual(emocoes, [[n for n, v in zip(EMOCOES, e) if v >= 0.5] for e in esperado])
+        # anterior None (vindo do banco) = anterior ""; lote com padding não muda o resultado
+        com_none = EmocoesOnnx(destino=self.destino, arquivo=ARQUIVO_FP32).prever(
+            [{"anterior": None, "texto": "bom ótimo"}, *exemplos[1:]], batch=3)
+        self.assertEqual(com_none[1], probs)
+
+    def test_aplica_um_limiar_por_emocao(self):
+        self._exportar()
+        (self.destino / "limiares.json").write_text("[0, 0, 0, 1.01, 1.01, 1.01]")
+        emocoes, _ = EmocoesOnnx(destino=self.destino).prever([{"anterior": "", "texto": "bom"}])
+        self.assertEqual(emocoes, [["alegria", "raiva", "tristeza"]])
+
+    def test_sem_arquivo_exportado_levanta_erro(self):
+        with self.assertRaisesRegex(ModeloNaoTreinado, "exportar_onnx"):
+            EmocoesOnnx(destino=self.destino)
+
+    def test_exportar_sem_pesos_aponta_o_treino(self):
+        with patch("analise.modelos.emocoes_onnx.DESTINO", self.destino / "vazio"):
+            with self.assertRaisesRegex(CommandError, "treinar_emocoes"):
+                call_command("exportar_onnx", modelos=["emocoes"], stdout=open("/dev/null", "w"))
+
+
 class ClassificadorTest(TestCase):
     def setUp(self):
         modelo.cache_clear()
+        modelo_emocoes.cache_clear()
         self.addCleanup(modelo.cache_clear)
+        self.addCleanup(modelo_emocoes.cache_clear)
         self.conversa = Conversa.objects.create(origem_id="1", fonte="t")
         self.outra = Conversa.objects.create(origem_id="2", fonte="t")
         self.u1 = Mensagem.objects.create(conversa=self.conversa, ordem=1, autor=USUARIO, texto="bom")
@@ -260,6 +338,72 @@ class ClassificadorTest(TestCase):
         modelo("classico")
         self.assertEqual(self.carregar.call_count, 2)
 
-    def test_padrao_e_bertimbau(self):
-        classificar_conversas([self.conversa.id])
-        self.carregar.assert_called_once_with("bertimbau")
+    def _emocoes_falso(self):
+        falso = MagicMock()
+        falso.prever.side_effect = lambda ex: ([["raiva"]] * len(ex), [{"raiva": 0.8}] * len(ex))
+        return patch("analise.modelos.emocoes_onnx.EmocoesOnnx", return_value=falso), falso
+
+    def test_padrao_e_bertimbau_via_onnx(self):
+        # produção não usa o Bertimbau do torch: só o exportado
+        alvo, _ = self._emocoes_falso()
+        with patch("analise.modelos.bertimbau_onnx.BertimbauOnnx", return_value=self.falso) as onnx, alvo:
+            classificar_conversas([self.conversa.id])
+        onnx.assert_called_once_with()
+        self.carregar.assert_not_called()
+
+    def test_padrao_classifica_emocoes_com_a_mensagem_anterior(self):
+        alvo, emocoes = self._emocoes_falso()
+        with patch("analise.modelos.bertimbau_onnx.BertimbauOnnx", return_value=self.falso), alvo:
+            self.assertEqual(classificar_conversas([self.conversa.id]), 2)
+        # anterior = mensagem imediatamente anterior, de qualquer autor (aqui, a do atendente)
+        emocoes.prever.assert_called_once_with([{"anterior": "", "texto": "bom"},
+                                                {"anterior": "ruim", "texto": "ok"}])
+        self.u2.refresh_from_db()
+        self.assertEqual((self.u2.rotulo_pred, self.u2.emocoes_pred, self.u2.emocoes_score),
+                         (POSITIVO, ["raiva"], {"raiva": 0.8}))
+        self.at.refresh_from_db()
+        self.assertIsNone(self.at.emocoes_pred)
+
+    def test_padrao_apenas_nao_classificadas_inclui_quem_nao_tem_emocoes(self):
+        # u2 tem polaridade de antes das emoções existirem: entra para ganhar as emoções
+        alvo, emocoes = self._emocoes_falso()
+        Mensagem.objects.filter(pk=self.u1.pk).update(rotulo_pred=NEUTRO, emocoes_pred=[])
+        with patch("analise.modelos.bertimbau_onnx.BertimbauOnnx", return_value=self.falso), alvo:
+            self.assertEqual(classificar_conversas([self.conversa.id], apenas_nao_classificadas=True), 1)
+        emocoes.prever.assert_called_once_with([{"anterior": "ruim", "texto": "ok"}])
+
+    def test_outros_degraus_nao_rodam_emocoes(self):
+        alvo, emocoes = self._emocoes_falso()
+        with alvo as classe:
+            classificar_conversas([self.conversa.id], nome="lexico")
+        classe.assert_not_called()
+        self.u1.refresh_from_db()
+        self.assertIsNone(self.u1.emocoes_pred)
+
+    def test_le_em_lotes_sem_repetir_nem_pular(self):
+        extra = [Mensagem.objects.create(conversa=self.conversa, ordem=10 + i, autor=USUARIO, texto=f"m{i}")
+                 for i in range(3)]
+        self.assertEqual(classificar_conversas([self.conversa.id], nome="lexico", lote=2), 5)
+        lotes = [c.args[0] for c in self.falso.prever.call_args_list]
+        self.assertEqual(lotes, [["bom", "ok"], ["m0", "m1"], ["m2"]])
+        self.assertTrue(all(m.rotulo_pred for m in Mensagem.objects.filter(pk__in=[e.pk for e in extra])))
+
+    def test_apenas_nao_classificadas_em_lotes(self):
+        # o filtro rotulo_pred__isnull muda conforme o lote grava: a paginação por pk não pode pular nada
+        for i in range(3):
+            Mensagem.objects.create(conversa=self.conversa, ordem=10 + i, autor=USUARIO, texto=f"m{i}")
+        self.assertEqual(classificar_conversas([self.conversa.id], nome="lexico",
+                                               apenas_nao_classificadas=True, lote=1), 4)
+
+    def test_verificar_exige_onnx_exportado(self):
+        with patch("analise.classificador.caminho_pesos", return_value=Path("/nao/existe.onnx")):
+            with self.assertRaisesRegex(ModeloNaoTreinado, "exportar_onnx"):
+                verificar("bertimbau")
+            verificar("lexico")  # os outros não dependem do arquivo
+
+    def test_verificar_exige_tambem_o_onnx_de_emocoes(self):
+        existe = Path(__file__)
+        so_polaridade = lambda destino: existe if destino != emocoes_onnx.DESTINO else Path("/nao/existe.onnx")  # noqa: E731
+        with patch("analise.classificador.caminho_pesos", side_effect=so_polaridade):
+            with self.assertRaisesRegex(ModeloNaoTreinado, "existe.onnx"):
+                verificar("bertimbau")

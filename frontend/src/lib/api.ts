@@ -4,6 +4,17 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 export type Role = "ADMIN" | "USER";
 export type Sentimento = "positivo" | "negativo" | "neutro";
 export type Modelo = "lexico" | "classico" | "bertimbau";
+export type Emocao = "alegria" | "raiva" | "tristeza" | "medo" | "surpresa" | "nojo";
+
+// ordem e cores das emoções em todas as telas
+export const EMOCOES: { chave: Emocao; nome: string; cor: string }[] = [
+  { chave: "alegria", nome: "Alegria", cor: "#10b981" },
+  { chave: "raiva", nome: "Raiva", cor: "#ef4444" },
+  { chave: "tristeza", nome: "Tristeza", cor: "#3b82f6" },
+  { chave: "medo", nome: "Medo", cor: "#8b5cf6" },
+  { chave: "surpresa", nome: "Surpresa", cor: "#f59e0b" },
+  { chave: "nojo", nome: "Nojo", cor: "#65a30d" },
+];
 
 export interface LoginResponse {
   email: string;
@@ -26,10 +37,20 @@ export interface UploadResponse {
 }
 
 export interface AnalisarResponse {
+  tarefa_id: string;
   fonte: string;
   total_conversas: number;
-  mensagens_classificadas: number;
+  lotes: number;
   modelo_utilizado: Modelo;
+}
+
+export interface StatusAnaliseResponse {
+  tarefa_id: string;
+  estado: "processando" | "concluido" | "erro";
+  lotes: number;
+  lotes_concluidos: number;
+  mensagens_classificadas: number;
+  erro: string | null;
 }
 
 export interface Indicadores {
@@ -55,6 +76,8 @@ export interface Mensagem {
   rotulo: Sentimento | null;
   score: number | null;
   rotulo_real: Sentimento | null;
+  emocoes: Emocao[] | null; // [] = neutro; null = ainda sem emoções (só o BERTimbau gera)
+  emocoes_score: Record<Emocao, number> | null;
 }
 
 export interface ConversaDetalhe extends ConversaListItem {
@@ -78,6 +101,8 @@ export interface McNemarComparacao {
 
 export interface MetricasResponse {
   distribuicao: Record<Sentimento, number>;
+  // mensagens de cliente com emoções classificadas; uma mensagem pode contar em várias emoções
+  emocoes: { mensagens: number; contagem: Record<Emocao | "neutro", number> };
   total_conversas: number;
   modelos: {
     n_teste: number;

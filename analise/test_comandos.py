@@ -275,3 +275,54 @@ class TreinarBertimbauComandoTest(SplitTemporarioMixin, TestCase):
         out, _ = _rodar("treinar_bertimbau", "--amostra", "5", "--fonte", "teste")
         self.assertEqual(len(FakeBertimbau.instancias[0].textos), 5)
         self.assertIn("treino: 5 | teste reservado: 6", out)
+
+
+class EmocoesLlmNotasTest(TestCase):
+    def test_notas_na_ordem_e_cortadas(self):
+        from .management.commands.emocoes_llm import notas
+        resposta = json.dumps({"nojo": 1.4, "alegria": 0.9, "raiva": -0.2, "tristeza": 0, "medo": 0.5, "surpresa": 0.1})
+        self.assertEqual(notas(resposta), [0.9, 0.0, 0.0, 0.5, 0.1, 1.0])
+
+    def test_misturar_so_onde_ha_nota(self):
+        from .management.commands.emocoes_llm import misturar
+        exemplos = [{"origem_id": "a", "y": [1, 0]}, {"origem_id": "b", "y": [0, 1]}]
+        self.assertEqual(misturar(exemplos, {"a": [0.0, 0.8]}, 0.5), 1)
+        self.assertEqual(exemplos[0]["y"], [0.5, 0.4])
+        self.assertEqual(exemplos[1]["y"], [0, 1])
+
+
+class AnotarComandoTest(TestCase):
+    def setUp(self):
+        for c in range(3):
+            conversa = Conversa.objects.create(origem_id=f"c{c}", fonte="chat")
+            Mensagem.objects.create(conversa=conversa, ordem=1, autor=ATENDENTE, texto="olá, em que posso ajudar?")
+            Mensagem.objects.create(conversa=conversa, ordem=2, autor=USUARIO, texto=f"mensagem {c}")
+
+    def _anotar(self, *respostas):
+        with patch("builtins.input", side_effect=list(respostas)):
+            return _rodar("anotacao", "anotar", "--fontes", "chat", "--anotador", "ana", "--n", "3")[0]
+
+    def test_grava_volta_e_continua_de_onde_parou(self):
+        from .models import HUMANO, RotuloEmocao
+        out = self._anotar("xyz", "ar", "v", "0", "q")  # inválido, anota, volta, refaz como neutro, sai
+        self.assertIn("não entendi", out)
+        self.assertIn("anterior: olá", out)
+        rotulos = RotuloEmocao.objects.filter(origem=HUMANO, anotador="ana")
+        self.assertEqual([r.emocoes for r in rotulos], [[]])
+
+        self._anotar("t", "mn")  # retoma nas duas que faltam; sem mais input termina sozinho
+        self.assertEqual(sorted(sorted(r.emocoes) for r in rotulos.all()), [[], ["medo", "nojo"], ["tristeza"]])
+        self.assertIn("3/3 já anotadas", self._anotar())
+
+
+class BancadaComparacaoTest(TestCase):
+    def test_rotulo_diferente_ou_prob_fora_da_tolerancia_reprova(self):
+        from .management.commands.bancada import comparar
+
+        ref = {"a": ("positivo", [0.9]), "b": (["raiva"], [0.8, 0.1])}
+        n, rotulos, delta, _ = comparar(ref, {"a": ("positivo", [0.9004]), "b": (["raiva"], [0.8, 0.1])}, 1e-3)
+        self.assertEqual((n, rotulos), (2, 0))
+        self.assertAlmostEqual(delta, 0.0004)
+        self.assertTrue(comparar(ref, {"a": ("positivo", [0.9004])}, 1e-3)[3])
+        self.assertFalse(comparar(ref, {"a": ("negativo", [0.9])}, 1e-3)[3])   # rótulo mudou
+        self.assertFalse(comparar(ref, {"a": ("positivo", [0.95])}, 1e-3)[3])  # prob além da tolerância

@@ -22,7 +22,8 @@ de atendimento, com indicadores de trajetória da conversa. Entregável duplo: u
         ↓ HTTP/JSON
 Django (app único `analise`)
   views.py ──> importacao.py    CSV/JSON → banco, transação atômica
-           ──> classificador.py cache lru do modelo, inferência síncrona
+           ──> tasks.py         group Celery em lotes de 50 → workers (Redis)
+                        └─> classificador.py BERTimbau int8 via ONNX, cache por worker
            ──> indicadores.py   trajetória da conversa, calculada por consulta
            ──> avaliacao.py     split por conversa, F1 macro, McNemar
                     ↓

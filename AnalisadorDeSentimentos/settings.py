@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 from pathlib import Path
 import os
+import sys
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -78,12 +79,28 @@ WSGI_APPLICATION = "AnalisadorDeSentimentos.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": os.environ.get("DATABASE_PATH", BASE_DIR / "db.sqlite3"),
+# DATABASE_HOST definido (RDS) -> Postgres; senão SQLite local.
+# Vários workers escrevendo ao mesmo tempo pedem Postgres: o SQLite trava o arquivo inteiro.
+if os.environ.get("DATABASE_HOST"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "HOST": os.environ["DATABASE_HOST"],
+            "PORT": os.environ.get("DATABASE_PORT", "5432"),
+            "NAME": os.environ.get("DATABASE_NAME", "analisador"),
+            "USER": os.environ.get("DATABASE_USER", "postgres"),
+            "PASSWORD": os.environ.get("DATABASE_PASSWORD", ""),
+            "CONN_MAX_AGE": 60,
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.environ.get("DATABASE_PATH", BASE_DIR / "db.sqlite3"),
+            "OPTIONS": {"timeout": 20},  # espera o lock de outro worker em vez de falhar na hora
+        }
+    }
 
 
 # Password validation
@@ -131,3 +148,19 @@ MAILERS = {
         "BACKEND": "django.core.mail.backends.console.EmailBackend",
     },
 }
+
+
+# Celery: a classificação roda em workers, fora do processo web.
+# Mais vazão = mais workers (docker compose up --scale worker=N), não mais memória por worker.
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_RESULT_EXPIRES = 24 * 3600
+CELERY_TASK_ACKS_LATE = True  # worker morreu no meio do lote -> o lote volta para a fila
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # cada worker reserva só o lote que está processando
+
+if "test" in sys.argv:  # testes sem Redis: a tarefa roda na hora e o resultado fica em memória
+    CELERY_BROKER_URL = "memory://"
+    CELERY_RESULT_BACKEND = "cache+memory://"
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_STORE_EAGER_RESULT = True

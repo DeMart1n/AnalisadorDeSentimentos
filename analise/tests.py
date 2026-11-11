@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.contrib.auth.hashers import make_password
 
 from .importacao import ErroDeImportacao, importar
-from .models import Conversa, Mensagem, Users
+from .models import USUARIO, Conversa, Mensagem, Users
 from .auth import token_generator
 
 CSV = (
@@ -435,10 +435,11 @@ class ApiTest(TestCase):
                 content_type="application/json",
                 **self.user_headers,
             )
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 202)
         self.assertEqual(r.json()["fonte"], "teste")
         self.assertEqual(r.json()["total_conversas"], 2)
-        self.assertEqual(r.json()["mensagens_classificadas"], 2)
+        status = self.client.get(f"/api/conversas/analisar/{r.json()['tarefa_id']}", **self.user_headers)
+        self.assertEqual(status.json()["mensagens_classificadas"], 2)
 
     def test_analisar_conversas_fonte_inexistente(self):
         r = self.client.post(
@@ -554,9 +555,16 @@ class ApiTest(TestCase):
         self.assertEqual(self.client.get("/api/conversas/99999").status_code, 404)
 
     def test_metricas(self):
+        Mensagem.objects.filter(autor=USUARIO).update(emocoes_pred=[])
+        Mensagem.objects.filter(autor=USUARIO).filter(pk=Mensagem.objects.filter(autor=USUARIO).first().pk) \
+            .update(emocoes_pred=["raiva", "tristeza"])
         r = self.client.get("/api/metricas")
         self.assertEqual(r.status_code, 200)
         self.assertIn("distribuicao", r.json())
+        emocoes = r.json()["emocoes"]["contagem"]
+        self.assertEqual(r.json()["emocoes"]["mensagens"], Mensagem.objects.filter(autor=USUARIO).count())
+        self.assertEqual((emocoes["raiva"], emocoes["tristeza"], emocoes["alegria"]), (1, 1, 0))
+        self.assertEqual(emocoes["neutro"], Mensagem.objects.filter(autor=USUARIO).count() - 1)
 
     def test_openapi_spec(self):
         r = self.client.get("/api/openapi.yaml")
@@ -681,6 +689,25 @@ class RotuloEmocaoTest(TestCase):
         self.assertEqual(r.mensagem.conversa.origem_id, "dev_e1")
         self.assertTrue(r.mensagem.texto.startswith("[NOME]"))
 
+    def test_importar_goemotions_raiva_sem_disapproval(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from django.core.management import call_command
+
+        from .models import RotuloEmocao
+
+        linhas = [{"id": "e1", "ekman": ["anger"], "original": ["disapproval"]},
+                  {"id": "e2", "ekman": ["anger", "joy"], "original": ["annoyance", "joy"]}]
+        with tempfile.TemporaryDirectory() as d:
+            arq = Path(d) / "t.jsonl"
+            arq.write_text("".join(json.dumps({**l, "split": "dev", "texto": "x", "texto_pt": "y"}) + "\n"
+                                   for l in linhas))
+            call_command("importar_goemotions", arquivo=arq, stdout=open("/dev/null", "w"))
+        rotulos = {r.mensagem.conversa.origem_id: r.emocoes for r in RotuloEmocao.objects.all()}
+        self.assertEqual(rotulos, {"dev_e1": [], "dev_e2": ["alegria", "raiva"]})
+
 
 class EmocoesTest(TestCase):
     def test_limiar_maximiza_f1_por_emocao(self):
@@ -713,4 +740,7 @@ class EmocoesTest(TestCase):
         self.assertEqual({k: len(v) for k, v in partes.items()},
                          {"validacao": 1, "teste_goemotions_pt": 1, "treino": 1})
         with self.assertRaises(ValueError):
-            split_emocoes([{"fonte": "chat", "origem_id": "c1"}])
+            split_emocoes([{"fonte": "chat", "origem_id": "c1", "origem": "llm"}])
+        # rótulo humano de chat real vira teste, nunca treino
+        self.assertEqual(list(split_emocoes([{"fonte": "chat", "origem_id": "c1", "origem": "humano"}])),
+                         ["teste_chat"])

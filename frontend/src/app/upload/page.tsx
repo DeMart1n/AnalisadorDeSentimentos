@@ -3,10 +3,9 @@
 import { useState, useRef } from 'react';
 import { AppLayout } from '@/components/AppLayout';
 import { useAuth } from '@/lib/auth';
-import { api, UploadResponse, AnalisarResponse } from '@/lib/api';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { api, UploadResponse, AnalisarResponse, StatusAnaliseResponse } from '@/lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 export default function UploadPage() {
@@ -19,8 +18,21 @@ export default function UploadPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<UploadResponse | null>(null);
   
-  const [selectedModel, setSelectedModel] = useState<'bertimbau' | 'lexico'>('lexico');
+  const [selectedModel, setSelectedModel] = useState<'bertimbau' | 'lexico'>('bertimbau');
   const [analysisSuccess, setAnalysisSuccess] = useState<AnalisarResponse | null>(null);
+
+  // a classificação roda nos workers: o POST só enfileira, o progresso vem do status
+  const statusQuery = useQuery({
+    queryKey: ['status-analise', analysisSuccess?.tarefa_id],
+    queryFn: async () =>
+      (await api.get<StatusAnaliseResponse>(`/conversas/analisar/${analysisSuccess!.tarefa_id}`)).data,
+    enabled: !!analysisSuccess,
+    // GET falhou (tarefa expirada, rede, Redis fora): para de consultar em vez de girar para sempre
+    refetchInterval: (query) =>
+      query.state.status !== 'error' && (query.state.data?.estado === 'processando' || !query.state.data) ? 2000 : false,
+    retry: false,
+  });
+  const status = statusQuery.data;
 
   const uploadMutation = useMutation({
     mutationFn: async (selectedFile: File) => {
@@ -70,6 +82,8 @@ export default function UploadPage() {
       }
     }
   });
+  const analisando = analisarMutation.isPending ||
+    (!!analysisSuccess && !statusQuery.isError && status?.estado !== 'concluido' && status?.estado !== 'erro');
 
   if (user?.role !== 'ADMIN') {
     return (
@@ -211,7 +225,7 @@ export default function UploadPage() {
                 </div>
               </div>
 
-              {!analysisSuccess ? (
+              {status?.estado !== 'concluido' ? (
                 <div className="flex flex-col border-t border-outline-variant pt-6">
                   <h3 className="font-semibold text-on-surface mb-2">Classificação por Inteligência Artificial</h3>
                   <p className="text-sm text-on-surface-variant mb-4">
@@ -232,7 +246,7 @@ export default function UploadPage() {
                         <span className="font-semibold text-sm text-on-surface">Léxico (Instantâneo)</span>
                         <input type="radio" name="model" checked={selectedModel === 'lexico'} onChange={() => setSelectedModel('lexico')} className="accent-[#4f46e5]" />
                       </div>
-                      <span className="text-xs text-outline">Piso comparativo baseado em dicionário. Executa em menos de 1 segundo.</span>
+                      <span className="text-xs text-outline">Piso comparativo baseado em dicionário. Só sentimento, sem emoções.</span>
                     </label>
 
                     <label 
@@ -247,25 +261,35 @@ export default function UploadPage() {
                         <span className="font-semibold text-sm text-on-surface">BERTimbau (Deep Learning)</span>
                         <input type="radio" name="model" checked={selectedModel === 'bertimbau'} onChange={() => setSelectedModel('bertimbau')} className="accent-[#4f46e5]" />
                       </div>
-                      <span className="text-xs text-outline">Modelo Transformer Neural (requer pesos treinados no servidor ou tempo em CPU).</span>
+                      <span className="text-xs text-outline">Modelo Transformer: sentimento e emoções. Roda em fila, com progresso abaixo.</span>
                     </label>
                   </div>
 
                   <button 
                     onClick={handleAnalyze}
-                    disabled={analisarMutation.isPending}
+                    disabled={analisando}
                     className="w-full py-3 rounded-lg bg-[#4f46e5] text-white font-label-md font-semibold hover:bg-[#4338ca] transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-70"
                   >
-                    {analisarMutation.isPending ? <span className="material-symbols-outlined animate-spin text-xl">sync</span> : <span className="material-symbols-outlined text-xl">psychology</span>}
-                    {analisarMutation.isPending 
-                      ? (selectedModel === 'bertimbau' ? 'Processando BERTimbau (aguarde)...' : 'Classificando via Léxico...') 
-                      : `Executar Análise com ${selectedModel === 'bertimbau' ? 'BERTimbau' : 'Léxico'}`
-                    }
+                    {analisando ? <span className="material-symbols-outlined animate-spin text-xl">sync</span> : <span className="material-symbols-outlined text-xl">psychology</span>}
+                    {analisando
+                      ? `Classificando via ${selectedModel === 'bertimbau' ? 'BERTimbau' : 'Léxico'}...`
+                      : `Executar Análise com ${selectedModel === 'bertimbau' ? 'BERTimbau' : 'Léxico'}`}
                   </button>
-
-                  {analisarMutation.isPending && selectedModel === 'bertimbau' && (
+                  {analisando && (
                     <p className="text-center text-xs text-outline mt-3">
-                      Por favor, aguarde. Inferência neural de 109M parâmetros em CPU pode levar de 1 a 3 minutos...
+                      {status
+                        ? `${status.lotes_concluidos} de ${status.lotes} lotes · ${status.mensagens_classificadas} mensagens classificadas`
+                        : 'Enviando para a fila de classificação...'}
+                    </p>
+                  )}
+                  {status?.estado === 'erro' && (
+                    <p className="text-center text-xs text-red-700 mt-3">
+                      A classificação falhou: {status.erro}. Tente novamente.
+                    </p>
+                  )}
+                  {statusQuery.isError && (
+                    <p className="text-center text-xs text-red-700 mt-3">
+                      Não foi possível consultar o progresso da classificação. Tente novamente.
                     </p>
                   )}
 
@@ -285,7 +309,7 @@ export default function UploadPage() {
                     <span className="material-symbols-outlined text-3xl text-[#10b981] mb-2">auto_awesome</span>
                     <h3 className="font-semibold text-[#065f46] text-lg">Classificação Finalizada!</h3>
                     <p className="text-sm text-[#047857] mt-1 mb-4">
-                      Todas as {analysisSuccess.mensagens_classificadas} mensagens foram classificadas com sucesso.
+                      Todas as {status.mensagens_classificadas} mensagens foram classificadas com sucesso.
                     </p>
                     <div className="flex items-center gap-3 w-full">
                       <button 

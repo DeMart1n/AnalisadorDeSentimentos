@@ -22,3 +22,9 @@ models/bertimbau/
 # Pesos do classificador de emoções — manage.py treinar_emocoes
 models/emocoes/
 .coverage*
+# backups de pesos (ex.: bertimbau-1ep, emocoes-0510)
+models/bertimbau-*/
+models/emocoes-*/
+
+# referência da bancada: amarrada aos pesos locais (que também não vão para o git)
+models/bancada/

@@ -22,8 +22,9 @@ from .bertimbau import BASE, MAX_LEN, dispositivo, pesos_salvos
 
 DESTINO = Path(__file__).resolve().parents[2] / "models" / "emocoes"
 # peso relativo de cada exemplo da fonte no sorteio; fonte ausente = 1
-# ponytail: valores a olho (GoEmotions tem ~7x o BRIGHTER); ajustar na ablação da Fase 7
-PESO_FONTE = {"goemotions_pt": 0.3, "brighter_ptbr": 1.0}
+# ponytail: valores a olho (GoEmotions tem ~7x o BRIGHTER); BRIGHTER subiu de 1 para 2 em 2026-10-20
+# para pesar ~metade do sorteio; ajustar na ablação da Fase 7
+PESO_FONTE = {"goemotions_pt": 0.3, "brighter_ptbr": 2.0}
 GRADE_LIMIARES = np.arange(0.05, 0.96, 0.05)
 
 
@@ -96,7 +97,8 @@ class Emocoes:
         y = torch.tensor([e["y"] for e in exemplos], dtype=torch.double)
         pos = (peso[:, None] * y).sum(0)
         neg = (peso[:, None] * (1 - y)).sum(0)
-        pos_weight = (neg / pos.clamp(min=1e-6)).clamp(max=50).float().to(self.device)
+        # raiz quadrada: o peso cheio empurrava as raras (nojo, medo) para falso positivo
+        pos_weight = (neg / pos.clamp(min=1e-6)).sqrt().clamp(max=50).float().to(self.device)
         perda_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
         self.modelo.train()

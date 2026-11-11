@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from analise.avaliacao_emocoes import PUBLICAS, carregar_emocoes, split_emocoes
 from analise.modelos.bertimbau import dispositivo
+from analise.management.commands.emocoes_llm import misturar, notas_llm
 from analise.modelos.emocoes import Emocoes
 
 
@@ -17,6 +18,8 @@ class Command(BaseCommand):
         parser.add_argument("--batch", type=int, default=32)
         parser.add_argument("--amostra", type=int, default=0,
                             help="limita treino e validação a N exemplos cada (teste de fumaça)")
+        parser.add_argument("--alfa-llm", type=float, default=0.0,
+                            help="peso das notas do LLM (data/llm/lotes/treino_*) no alvo do treino; 0 desliga")
         parser.add_argument("--duas-etapas", action="store_true",
                             help="etapa 2: 1 época, lr menor, só com dados de chat (real, LLM, sintético)")
 
@@ -29,6 +32,11 @@ class Command(BaseCommand):
             rng = random.Random(42)
             treino = rng.sample(treino, min(opts["amostra"], len(treino)))
             validacao = rng.sample(validacao, min(opts["amostra"], len(validacao)))
+        if opts["alfa_llm"]:
+            n = misturar(treino, notas_llm(), opts["alfa_llm"])
+            if not n:
+                raise CommandError("--alfa-llm sem nenhuma nota de LLM em data/llm/lotes/treino_*/lote_*.rotulado.jsonl")
+            self.stdout.write(f"alvo misturado com o LLM (alfa {opts['alfa_llm']}) em {n} de {len(treino)} exemplos")
         chat = None
         if opts["duas_etapas"]:
             chat = [e for e in treino if e["fonte"] not in PUBLICAS]
